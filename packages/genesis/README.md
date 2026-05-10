@@ -4,7 +4,7 @@ Chunk loading system for Luau. Manages procedural world chunks around a target p
 
 ## Usage
 
-```luau
+```lua
 local Genesis = require(genesis)
 local Terra = require(terra)
 
@@ -54,7 +54,7 @@ Changes the render distance. Chunks outside the new distance are queued for dest
 
 Returns a snapshot of current loader state.
 
-```luau
+```lua
 type LoaderStats = {
     State: {
         Total: number,
@@ -82,7 +82,7 @@ type LoaderStats = {
 
 A generator is any table with `Create`, `Destroy`, and `Sample` fields.
 
-```luau
+```lua
 type Generator = {
     Create: (positionGroups: { { vector } }, sizes: { vector }) -> (),
     Destroy: (positions: { vector }) -> (),
@@ -96,7 +96,7 @@ type Generator = {
 
 Budget controls how much time per frame the loader spends creating and destroying chunks. Adaptive budgeting is enabled by default and adjusts limits based on frame time.
 
-```luau
+```lua
 type BudgetConfig = {
     LoadSeconds: number?,
     DestroySeconds: number?,

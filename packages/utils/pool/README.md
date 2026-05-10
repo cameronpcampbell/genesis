@@ -4,7 +4,7 @@ Generic object pool for Luau with automatic sizing, bulk operations, and automat
 
 ## Usage
 
-```luau
+```lua
 local Pool = require(pool)
 
 local myPool = Pool.New({

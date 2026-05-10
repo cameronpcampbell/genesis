@@ -4,7 +4,7 @@ A collection of procedural terrain generators for [Genesis](/packages/genesis/RE
 
 ## Usage
 
-```luau
+```lua
 local Genesis = require(genesis)
 local Terra = require(terra)
 

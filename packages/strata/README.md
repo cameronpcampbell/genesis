@@ -4,7 +4,7 @@ Octree-based LOD subdivision for Luau. Given a target position, returns a set of
 
 ## Usage
 
-```luau
+```lua
 local Strata = require(strata)
 
 local octree = Strata.New({
@@ -51,7 +51,7 @@ end
 
 Updates subdivision toward `target` and returns the change vs. the previous target. Returns `nil` when the target has moved less than `BaseLeafSize` from the last refresh, so a real refresh did not run.
 
-```luau
+```lua
 type Diff = {
     -- Created[i] is a list of centers, with the
     -- corresponding size at CreatedSizes[i].
@@ -73,7 +73,7 @@ Returns the centers of every currently-rendered leaf and marks them un-rendered.
 
 Counts live nodes and rendered leaves. Pass an existing table to reuse it.
 
-```luau
+```lua
 type Stats = {
     Leaves: number,
     Nodes: number,

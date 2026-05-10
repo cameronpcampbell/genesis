@@ -4,7 +4,7 @@ Circular buffer for Luau. Grows automatically when full and shrinks when sparsel
 
 ## Usage
 
-```luau
+```lua
 local RingBuffer = require(ringBuffer)
 
 local myRingBuffer = RingBuffer.New(8) -- initial capacity
