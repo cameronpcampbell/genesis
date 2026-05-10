@@ -1,0 +1,16 @@
+{
+    "name": "strata-benchmark",
+    "tree": {
+        "$className": "DataModel",
+
+        "ServerScriptService": {
+            "benchmark": {
+                "$path": "benchmark.server.luau"
+            },
+
+            "packages": {
+                "$path": "../../packages"
+            }
+        }
+    }
+}

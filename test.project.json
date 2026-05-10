@@ -1,0 +1,16 @@
+{
+    "name": "genesis-2026",
+    "tree": {
+        "$className": "DataModel",
+
+        "StarterPlayer": {
+            "StarterPlayerScripts": {
+                "$path": "test",
+
+                "packages": {
+                    "$path": "packages"
+                }
+            }
+        }
+    }
+}

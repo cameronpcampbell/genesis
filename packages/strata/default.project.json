@@ -1,0 +1,6 @@
+{
+    "name": "strata",
+    "tree": {
+        "$path": "src"
+    }
+}

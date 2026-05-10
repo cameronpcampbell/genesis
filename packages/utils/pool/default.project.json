@@ -1,0 +1,6 @@
+{
+    "name": "pool",
+    "tree": {
+        "$path": "src"
+    }
+}

@@ -1,0 +1,6 @@
+{
+    "name": "ringBuffer",
+    "tree": {
+        "$path": "src"
+    }
+}

@@ -1,0 +1,6 @@
+{
+    "name": "yield",
+    "tree": {
+        "$path": "src"
+    }
+}
