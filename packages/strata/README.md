@@ -87,6 +87,8 @@ Tested on Apple M2 Max (12 core).
 
 BaseLeafSize = 32, SplitFactor = 2.5, 200 SetTarget calls along a path bounded by `0.4 * RootSize`.
 
+Script used for the benchmark can be found [here](./benchmark.server.luau).
+
 ### Tree shape
 
 |           | 4 lods | 6 lods | 8 lods |
