@@ -17,4 +17,4 @@ A procedural terrain generation library for Roblox.
 
 - **[Pool](/packages/utils/pool/README.md)**: A generic object pool library.
 - **[RingBuffer](/packages/utils/ringBuffer/README.md)**: A ring buffer library.
-- **[eMeshQueue](/packages/utils/eMeshQueue/README.md)**: A first come, first serve queue for creating editable meshes.
+- **[EMeshQueue](/packages/utils/eMeshQueue/README.md)**: A first come, first serve queue for creating editable meshes.
