@@ -91,28 +91,28 @@ Script used for the benchmark can be found [here](./benchmark.server.luau).
 
 ### Tree shape
 
-|           | 4 lods | 6 lods | 8 lods |
-|-----------|-------:|-------:|-------:|
-| Root size |  256   | 1024   | 4096   |
-| Leaves    |  512   | 1408   | 2304   |
-| Nodes     |  585   | 1609   | 2633   |
+|           |    4 lods |    6 lods |    8 lods |
+|-----------|----------:|----------:|----------:|
+| Root size | 256 studs | 1024 studs | 4096 studs |
+| Leaves    |       512 |      1408 |      2304 |
+| Nodes     |       585 |      1609 |      2633 |
 
 - **Root size**: side length of the root cell (`BaseLeafSize * 2 ^ (LodAmount - 1)`).
 - **Leaves**: rendered leaves after the initial subdivision at the origin.
 - **Nodes**: total live nodes (internal + leaf) in the tree.
 
-### Timings (ms)
+### Timings
 
-|                | 4 lods | 6 lods | 8 lods |
-|----------------|-------:|-------:|-------:|
-| Construct      | 0.067  | 0.015  | 0.018  |
-| Cold SetTarget | 0.208  | 0.531  | 0.892  |
-| Path avg       | 0.0164 | 0.2034 | 0.5460 |
-| Path p50       | 0.0002 | 0.2114 | 0.5573 |
-| Path p99       | 0.0918 | 0.5516 | 1.0195 |
-| Teardown       | 0.007  | 0.027  | 0.039  |
+|                |    4 lods |    6 lods |    8 lods |
+|----------------|----------:|----------:|----------:|
+| Construct      | 0.067 ms  | 0.015 ms  | 0.018 ms  |
+| Cold SetTarget | 0.208 ms  | 0.531 ms  | 0.892 ms  |
+| Path avg       | 0.0164 ms | 0.2034 ms | 0.5460 ms |
+| Path p50       | 0.0002 ms | 0.2114 ms | 0.5573 ms |
+| Path p99       | 0.0918 ms | 0.5516 ms | 1.0195 ms |
+| Teardown       | 0.007 ms  | 0.027 ms  | 0.039 ms  |
 
 - **Construct**: `Strata.New` allocation + level-data setup.
-- **Cold SetTarget**: first `SetTarget` on a fresh octree - nuilds the whole tree.
+- **Cold SetTarget**: first `SetTarget` on a fresh octree, builds the whole tree.
 - **Path avg / p50 / p99**: per-call time across all 200 path steps, including no-op skips. p99 is the worst-frame budget.
 - **Teardown**: `octree:Teardown()` time to release every live leaf.
