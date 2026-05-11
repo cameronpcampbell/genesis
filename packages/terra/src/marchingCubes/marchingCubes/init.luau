@@ -8,7 +8,6 @@ local EMeshQueue = require(script.Parent.Parent.Parent.utils.eMeshQueue)
 const LOOKUP_TABLE = require(script.lookupTable)
 
 const MOVE_RIGHT = 1
-
 const EMPTY_TABLE = {}
 
 export type MarchingCubesConfig = {
@@ -23,9 +22,6 @@ export type MarchingCubesConfig = {
 }
 
 type ValuesTable = { number }
-type ColorsIdsTable = { number }
-type VerticesTable = { [Vector3]: number }
-type MidPointsTable = { [Vector3]: { [Vector3]: Vector3 } }
 
 const LOD_COLORS = {
 	Color3.fromRGB(255, 80, 80),
@@ -37,48 +33,17 @@ const LOD_COLORS = {
 	Color3.fromRGB(220, 120, 255),
 }
 
-const MIDPOINT_PARENTS = {
-	{1, 2}, {2, 3}, {3, 4}, {4, 1},
-	{5, 6}, {6, 7}, {7, 8}, {8, 5},
-	{1, 5}, {2, 6}, {3, 7}, {4, 8}
+-- Flattened (edge -> 2 corner indexes) so we avoid an inner table per edge lookup.
+const MIDPOINT_PARENTS_FLAT = {
+	1, 2,  2, 3,  3, 4,  4, 1,
+	5, 6,  6, 7,  7, 8,  8, 5,
+	1, 5,  2, 6,  3, 7,  4, 8,
 }
 
---local CreateDataModelContentAsync = AssetService.CreateDataModelContentAsync
-    --:: (self: AssetService, content: Content, options: { [string]: any }?) -> (boolean, Content)
-
---[[
-const function ChooseVertexColor(colorAId: number, colorBId: number)
-	return colorAId
-	--[=[return
-    (colorAId == COLOR_GRASS_ID or colorBId == COLOR_GRASS_ID) and COLOR_GRASS_ID or
-		(colorAId == COLOR_STONE_ID or colorBId == COLOR_STONE_ID) and COLOR_STONE_ID or
-		COLOR_DIRT_ID]=]
-end]]
-
-
-type Bounds = { Min: Vector3, Max: Vector3 }
-
-const function CreateVertex(terrainEMesh: EditableMesh, vertices: VerticesTable, bounds: Bounds)
-	return function(pos: Vector3)
-		local vertexId = terrainEMesh:AddVertex(pos)
-		vertices[pos] = vertexId
-
-		bounds.Min = bounds.Min:Min(pos)
-		bounds.Max = bounds.Max:Max(pos)
-
-		return vertexId
-	end
-end
-
-
-const function IsosurfaceLerp(
-    pos1: Vector3, val1: number,
-    pos2: Vector3, val2: number,
-    isoValue: number
-)
-	return pos1 + ((isoValue - val1) / (val2 - val1)) * (pos2 - pos1)
-end
-
+type Bounds = {
+	MinX: number, MinY: number, MinZ: number,
+	MaxX: number, MaxY: number, MaxZ: number,
+}
 
 const function FractalNoise(
     x: number, y: number, z: number,
@@ -100,104 +65,113 @@ end
 const function SurfaceNoise(
     x: number, y: number, z: number,
     octaves: number, lacunarity: number, persistence: number,
-    scale: number, seed: number, isoValue: number
+    scale: number, seed: number, isoValue: number, amplitude: number
 )
 	return FractalNoise(
 	    x, z, seed,
 	    octaves, lacunarity, persistence, scale
-	) + ((y * 0.008) - isoValue)
-end
-
-const function Index3DToPosition(idx: number, voxelResOuter: number)
-	local idxInner = idx - 1
-	local x = idxInner // (voxelResOuter * voxelResOuter)
-	local z = (idxInner // voxelResOuter) % voxelResOuter
-	local y = idxInner % voxelResOuter
-
-	return Vector3.new(x, y, z)
+	) + ((y * amplitude) - isoValue)
 end
 
 const function MarchingCubes(
     eMesh: EditableMesh, values: ValuesTable,
-    isoValue: number, voxelResOuter: number,
+    isoValue: number, voxelResOuter: number, chunkVoxelCount: number,
     offsetA: number, offsetB: number, offsetC: number, offsetD: number,
     offsetE: number, offsetF: number, offsetG: number
 )
-	local vertices: VerticesTable = {}
+	-- Vertex dedup by packed edge identity (cornerA, cornerB in the value grid).
+	-- Adjacent voxels share corners by index, so the same edge between two cells
+	-- yields the same key, deduplicating without Vector3 userdata hashing.
+	local vertices: { [number]: number } = {}
+
+	local outerSq = voxelResOuter * voxelResOuter
+
 	local bounds: Bounds = {
-		Min = Vector3.new(math.huge, math.huge, math.huge),
-		Max = Vector3.new(-math.huge, -math.huge, -math.huge),
+		MinX = math.huge, MinY = math.huge, MinZ = math.huge,
+		MaxX = -math.huge, MaxY = -math.huge, MaxZ = -math.huge,
 	}
 
-	local createVertex = CreateVertex(eMesh, vertices, bounds)
+	-- Reused per-march scratch for the 8 voxel corner indexes into `values`.
+	local voxelCorners = table.create(8) :: { number }
+
+	local resolveVertex = function(ca: number, cb: number, key: number): number
+		local id = vertices[key]
+		if id then return id end
+
+		local inner = ca - 1
+		local ax = inner // outerSq
+		local az = (inner // voxelResOuter) % voxelResOuter
+		local ay = inner % voxelResOuter
+		local av = values[ca]
+
+		inner = cb - 1
+		local bx = inner // outerSq
+		local bz = (inner // voxelResOuter) % voxelResOuter
+		local by = inner % voxelResOuter
+		local bv = values[cb]
+
+		local t = (isoValue - av) / (bv - av)
+		local vx = ax + t * (bx - ax)
+		local vy = ay + t * (by - ay)
+		local vz = az + t * (bz - az)
+
+		if vx < bounds.MinX then bounds.MinX = vx end
+		if vy < bounds.MinY then bounds.MinY = vy end
+		if vz < bounds.MinZ then bounds.MinZ = vz end
+		if vx > bounds.MaxX then bounds.MaxX = vx end
+		if vy > bounds.MaxY then bounds.MaxY = vy end
+		if vz > bounds.MaxZ then bounds.MaxZ = vz end
+
+		id = eMesh:AddVertex(Vector3.new(vx, vy, vz))
+		vertices[key] = id
+		return id
+	end
 
 	local march = function(startIdx: number)
-		-- Gets the indexes of each corner of the voxel.
-		local voxelIndexA, voxelIndexB, voxelIndexC, voxelIndexD =
-			startIdx, startIdx + offsetA, startIdx + offsetB, startIdx + offsetC
-		local voxelIndexE, voxelIndexF, voxelIndexG, voxelIndexH =
-		    startIdx + offsetD, startIdx + offsetE, startIdx + offsetF, startIdx + offsetG
-		local voxelIndexes = {
-		    voxelIndexA, voxelIndexB, voxelIndexC, voxelIndexD,
-			voxelIndexE, voxelIndexF, voxelIndexG, voxelIndexH
-		}
+		voxelCorners[1] = startIdx
+		voxelCorners[2] = startIdx + offsetA
+		voxelCorners[3] = startIdx + offsetB
+		voxelCorners[4] = startIdx + offsetC
+		voxelCorners[5] = startIdx + offsetD
+		voxelCorners[6] = startIdx + offsetE
+		voxelCorners[7] = startIdx + offsetF
+		voxelCorners[8] = startIdx + offsetG
 
-		-- Calculates the index in the LOOKUP_TABLE for the voxel.
-		-- Does not use a loop as doing so would require either a subtraction
-		-- or an addition operation which would be slightly less performant.
-		local index: number = 0
-		if values[voxelIndexA] >= isoValue then index += 1 end
-		if values[voxelIndexB] >= isoValue then index += 2 end
-		if values[voxelIndexC] >= isoValue then index += 4 end
-		if values[voxelIndexD] >= isoValue then index += 8 end
-		if values[voxelIndexE] >= isoValue then index += 16 end
-		if values[voxelIndexF] >= isoValue then index += 32 end
-		if values[voxelIndexG] >= isoValue then index += 64 end
-		if values[voxelIndexH] >= isoValue then index += 128 end
-		if index == 0 or index == 255 then return end -- Voxel is empty.
+		local index = 0
+		if values[startIdx] >= isoValue then index += 1 end
+		if values[startIdx + offsetA] >= isoValue then index += 2 end
+		if values[startIdx + offsetB] >= isoValue then index += 4 end
+		if values[startIdx + offsetC] >= isoValue then index += 8 end
+		if values[startIdx + offsetD] >= isoValue then index += 16 end
+		if values[startIdx + offsetE] >= isoValue then index += 32 end
+		if values[startIdx + offsetF] >= isoValue then index += 64 end
+		if values[startIdx + offsetG] >= isoValue then index += 128 end
+		if index == 0 or index == 255 then return end
 
 		local lookupCase = LOOKUP_TABLE[index]
 
-		-- Iterates over the lookupCase in batches of 3 where each batch contains the indexes of 3 edges.
-		-- A vertex will be made (unless already made) somewhere along each of the the 3 edges.
-		-- The vertices will then be used to construct a triangle.
 		for i = 1, #lookupCase, 3 do
-			local edge1CornerIds = MIDPOINT_PARENTS[lookupCase[i]]
-			local edge2CornerIds = MIDPOINT_PARENTS[lookupCase[i + 1]]
-			local edge3CornerIds = MIDPOINT_PARENTS[lookupCase[i + 2]]
+			local e1 = lookupCase[i]
+			local e2 = lookupCase[i + 1]
+			local e3 = lookupCase[i + 2]
 
-			local edge1CornerAIdx, edge1CornerBIdx = voxelIndexes[edge1CornerIds[1]], voxelIndexes[edge1CornerIds[2]]
-			local edge2CornerAIdx, edge2CornerBIdx = voxelIndexes[edge2CornerIds[1]], voxelIndexes[edge2CornerIds[2]]
-			local edge3CornerAIdx, edge3CornerBIdx = voxelIndexes[edge3CornerIds[1]], voxelIndexes[edge3CornerIds[2]]
+			local c1a = voxelCorners[MIDPOINT_PARENTS_FLAT[e1 * 2 - 1]]
+			local c1b = voxelCorners[MIDPOINT_PARENTS_FLAT[e1 * 2]]
+			local c2a = voxelCorners[MIDPOINT_PARENTS_FLAT[e2 * 2 - 1]]
+			local c2b = voxelCorners[MIDPOINT_PARENTS_FLAT[e2 * 2]]
+			local c3a = voxelCorners[MIDPOINT_PARENTS_FLAT[e3 * 2 - 1]]
+			local c3b = voxelCorners[MIDPOINT_PARENTS_FLAT[e3 * 2]]
 
-      		local edge1CornerAPos, edge1CornerBPos =
-                Index3DToPosition(edge1CornerAIdx, voxelResOuter), Index3DToPosition(edge1CornerBIdx, voxelResOuter)
-			local edge2CornerAPos, edge2CornerBPos =
-			    Index3DToPosition(edge2CornerAIdx, voxelResOuter), Index3DToPosition(edge2CornerBIdx, voxelResOuter)
-			local edge3CornerAPos, edge3CornerBPos =
-			    Index3DToPosition(edge3CornerAIdx, voxelResOuter), Index3DToPosition(edge3CornerBIdx, voxelResOuter)
+			local key1, key2, key3
+			if c1a < c1b then key1 = c1a * chunkVoxelCount + c1b else key1 = c1b * chunkVoxelCount + c1a end
+			if c2a < c2b then key2 = c2a * chunkVoxelCount + c2b else key2 = c2b * chunkVoxelCount + c2a end
+			if c3a < c3b then key3 = c3a * chunkVoxelCount + c3b else key3 = c3b * chunkVoxelCount + c3a end
 
-			local edge1CornerAVal, edge1CornerBVal = values[edge1CornerAIdx], values[edge1CornerBIdx]
-			local edge2CornerAVal, edge2CornerBVal = values[edge2CornerAIdx], values[edge2CornerBIdx]
-			local edge3CornerAVal, edge3CornerBVal = values[edge3CornerAIdx], values[edge3CornerBIdx]
+			local id1 = resolveVertex(c1a, c1b, key1)
+			local id2 = resolveVertex(c2a, c2b, key2)
+			local id3 = resolveVertex(c3a, c3b, key3)
 
-			local vertex1Pos = IsosurfaceLerp(edge1CornerAPos, edge1CornerAVal, edge1CornerBPos, edge1CornerBVal, isoValue)
-			local vertex2Pos = IsosurfaceLerp(edge2CornerAPos, edge2CornerAVal, edge2CornerBPos, edge2CornerBVal, isoValue)
-			local vertex3Pos = IsosurfaceLerp(edge3CornerAPos, edge3CornerAVal, edge3CornerBPos, edge3CornerBVal, isoValue)
-
-			-- Makes sure all vert positions are unique to prevent any future issues when constructing a mesh.
-			if vertex1Pos == vertex2Pos or vertex1Pos == vertex3Pos or vertex2Pos == vertex3Pos then continue end
-
-			--local color1Id = ChooseVertexColor(colorsIds[edge1CornerAIdx], colorsIds[edge1CornerBIdx])
-			--local color2Id = ChooseVertexColor(colorsIds[edge2CornerAIdx], colorsIds[edge2CornerBIdx])
-			--local color3Id = ChooseVertexColor(colorsIds[edge3CornerAIdx], colorsIds[edge3CornerBIdx])
-
-			local vertex1Id = vertices[vertex1Pos] or createVertex(vertex1Pos)
-			local vertex2Id = vertices[vertex2Pos] or createVertex(vertex2Pos)
-			local vertex3Id = vertices[vertex3Pos] or createVertex(vertex3Pos)
-
-			local _triId = eMesh:AddTriangle(vertex1Id, vertex2Id, vertex3Id)
-			--terrainEMesh:SetFaceColors(triId, { color1Id, color2Id, color3Id })
+			eMesh:AddTriangle(id1, id2, id3)
 		end
 	end
 
@@ -236,19 +210,8 @@ const function Chunk(
 			local value2d = SurfaceNoise(
 			    x, 0 , z,
 				octaves, lacunarity, persistence, scale,
-				seed, isoValue
+				seed, isoValue, amplitude
 			)
-			--local amplValue2d = (-value2d) * 125
-
-			--[[if amplValue2d >= startY and amplValue2d <= endY then
-				local caveValue2d = CaveNoise(x, amplValue2d + 50, z)
-
-				if caveValue2d >= (value2d >= 0 and value2d - .5 or value2d + .5) then
-					caveValues[idx2d] = true
-				else
-					surfaceValues[idx2d] = value2d
-				end
-			end]]
 
 			for yIdx = 0, voxelRes do
 			    local y = startY + yIdx * voxelSize
@@ -262,7 +225,7 @@ const function Chunk(
 
 	local idx3d = 0
 	local march, bounds = MarchingCubes(
-    	eMesh, values, isoValue, voxelResOuter,
+    	eMesh, values, isoValue, voxelResOuter, chunkVoxelCount,
         offsetA, offsetB, offsetC, offsetD,
         offsetE, offsetF, offsetG
 	)
@@ -285,21 +248,14 @@ const function Chunk(
 	    return nil
 	end
 
-	--local _ok, content =
-	    --CreateDataModelContentAsync(AssetService, Content.fromObject(eMesh))
-
-	local meshLocalSize = bounds.Max - bounds.Min
-
-	--eMesh:Destroy()
-
 	local mesh = AssetService:CreateMeshPartAsync(Content.fromObject(eMesh))
 
 	mesh.Position = vector.create(startX, startY, startZ) :: any
 
 	mesh.Size = vector.create(
-		meshLocalSize.X * voxelSize,
-		meshLocalSize.Y * voxelSize,
-		meshLocalSize.Z * voxelSize
+		(bounds.MaxX - bounds.MinX) * voxelSize,
+		(bounds.MaxY - bounds.MinY) * voxelSize,
+		(bounds.MaxZ - bounds.MinZ) * voxelSize
 	) :: any
 
 	local lodBucket = math.round(math.log(chunkSize, 2))
@@ -358,7 +314,7 @@ const function New(config: MarchingCubesConfig?)
             return SurfaceNoise(
                 pos.x, pos.y, pos.z,
                 octaves, lacunarity, persistence, scale,
-                seed, isoValue
+                seed, isoValue, amplitude
             ) / amplitude
         end
      }

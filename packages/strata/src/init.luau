@@ -238,6 +238,8 @@ const function SetTarget(self: Strata, target: vector): Diff?
 	local nGroups = 0
 	local nDestroyed = 0
 
+	local targetX, targetY, targetZ = target.x, target.y, target.z
+
 	stack[1] = self.Root
 	sdfStack[1] = sample(self.Root.Center)
 	local stackTop = 1
@@ -265,15 +267,12 @@ const function SetTarget(self: Strata, target: vector): Diff?
 		end
 
 		local invSize = 1 / size
-		local snappedTarget = vector.create(
-			math.round(target.x * invSize) * size,
-			math.round(target.y * invSize) * size,
-			math.round(target.z * invSize) * size
-		)
-		local delta = snappedTarget - center
+		local dx = math.round(targetX * invSize) * size - center.x
+		local dy = math.round(targetY * invSize) * size - center.y
+		local dz = math.round(targetZ * invSize) * size - center.z
 
 		local maxAxis =
-		    math.max(math.abs(delta.x), math.abs(delta.y), math.abs(delta.z))
+		    math.max(math.abs(dx), math.abs(dy), math.abs(dz))
 
 		local shouldSplit = size > baseLeafSize and maxAxis < splitFactor * size
 

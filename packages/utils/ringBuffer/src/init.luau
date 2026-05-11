@@ -77,8 +77,29 @@ const function Discard<T>(self: RingBuffer<T>, n: number)
 	local count = self.Count
 	local toDrop = if n < count then n else count
 
-	for _ = 1, toDrop do
-		Pop(self)
+	local buf = self.Buffer
+	local head = self.Head
+	local capacity = self.Capacity
+
+	local firstSegLen = math.min(toDrop, capacity - head + 1)
+	for i = head, head + firstSegLen - 1 do
+		buf[i] = nil :: any
+	end
+	if firstSegLen < toDrop then
+		for i = 1, toDrop - firstSegLen do
+			buf[i] = nil :: any
+		end
+	end
+
+	local newHead = head + toDrop
+	if newHead > capacity then newHead -= capacity end
+	self.Head = newHead
+
+	local newCount = count - toDrop
+	self.Count = newCount
+
+	if capacity > self.MinCapacity and newCount <= capacity / 4 then
+		Resize(self, math.max(self.MinCapacity, math.floor(capacity / 2)))
 	end
 end
 

@@ -42,6 +42,8 @@ export type Reconciler = {
     CreateInflight: { [ChunkKey]: true },
     DestroyInflight: { [ChunkKey]: true },
     Octrees: { [ChunkKey]: Strata.Strata },
+    Undesired: { [ChunkKey]: true },
+    UndesiredCount: number,
     Reconciling: boolean,
     Target: vector?,
 
@@ -55,6 +57,13 @@ export type Reconciler = {
     LastChunkWorkSeconds: number,
     LoadBudgetSeconds: number,
     DestroyBudgetSeconds: number,
+
+    LoadBatch: { { vector } },
+    SizeBatch: { vector },
+    DestroyBatch: { vector },
+    ToCreate: { ChunkKey },
+    ToDestroy: { ChunkKey },
+    DestroyCandidates: { ChunkKey },
 
     Run: (self: Reconciler) -> (),
     Stats: (self: Reconciler) -> ReconcilerStats,
@@ -99,6 +108,7 @@ const function LoopBody(self: Reconciler)
     local loadQueue = self.LoadQueue
     local createInflight, destroyInflight =
         self.CreateInflight, self.DestroyInflight
+    local undesired = self.Undesired
     local baseLeafSize, lodAmount, splitFactor =
         self.BaseLeafSize, self.LodAmount, self.SplitFactor
     local rootSize = baseLeafSize * 2 ^ (lodAmount - 1)
@@ -106,6 +116,13 @@ const function LoopBody(self: Reconciler)
     local sample = generator.Sample
     local loadBudget = self.LoadBudgetSeconds
     local destroyBudget = self.DestroyBudgetSeconds
+
+    local loadBatch = self.LoadBatch
+    local sizeBatch = self.SizeBatch
+    local destroyBatch = self.DestroyBatch
+    local toCreate = self.ToCreate
+    local toDestroy = self.ToDestroy
+    local destroyCandidates = self.DestroyCandidates
 
     local loadElapsed = 0
     local destroyElapsed = 0
@@ -117,11 +134,9 @@ const function LoopBody(self: Reconciler)
         local loadItemCost = self.LoadItemCost
         local destroyItemCost = self.DestroyItemCost
 
-        local loadBatch: { { vector } } = {}
-        local sizeBatch: { vector } = {}
-        local destroyBatch: { vector } = {}
-        local toCreate: { ChunkKey } = {}
-        local toDestroy: { ChunkKey } = {}
+        table.clear(loadBatch)
+        table.clear(sizeBatch)
+        table.clear(destroyBatch)
         local toCreateN = 0
         local toDestroyN = 0
 
@@ -201,13 +216,10 @@ const function LoopBody(self: Reconciler)
 
         local destroyStructuralStart = os.clock()
 
-        local destroyCandidates: { ChunkKey } = {}
+        table.clear(destroyCandidates)
         local destroyCandidateN = 0
 
-        for key in octrees do
-            if desired[key] then continue end
-            if createInflight[key] then continue end
-
+        for key in undesired do
             destroyCandidateN += 1
             destroyCandidates[destroyCandidateN] = key
         end
@@ -227,6 +239,8 @@ const function LoopBody(self: Reconciler)
             end
 
             octrees[key] = nil
+            undesired[key] = nil
+            self.UndesiredCount -= 1
             destroyInflight[key] = true
             toDestroyN += 1
             toDestroy[toDestroyN] = key
@@ -245,8 +259,15 @@ const function LoopBody(self: Reconciler)
             local startClock = os.clock()
             generator.Create(loadBatch, sizeBatch)
 
+            -- Cleared keys whose desire flipped while create was in flight now
+            -- become pending destroys.
             for idx = 1, toCreateN do
-                createInflight[toCreate[idx]] = nil
+                local key = toCreate[idx]
+                createInflight[key] = nil
+                if desired[key] == nil and undesired[key] == nil then
+                    undesired[key] = true
+                    self.UndesiredCount += 1
+                end
             end
 
             local elapsed = os.clock() - startClock
@@ -326,13 +347,7 @@ const function GetStats(self: Reconciler): ReconcilerStats
         pendingCreate += 1
     end
 
-    local pendingDestroy = 0
-    for key in octrees do
-        if desired[key] then continue end
-        if createInflight[key] then continue end
-
-        pendingDestroy += 1
-    end
+    local pendingDestroy = self.UndesiredCount
 
     local octreeStats: Strata.Stats = {
         Leaves = 0,
@@ -368,6 +383,8 @@ function Reconciler.New(config: ReconcilerConfig): Reconciler
         CreateInflight = {},
         DestroyInflight = {},
         Octrees = {},
+        Undesired = {},
+        UndesiredCount = 0,
         Reconciling = false,
         Target = nil,
 
@@ -381,6 +398,13 @@ function Reconciler.New(config: ReconcilerConfig): Reconciler
         LastChunkWorkSeconds = 0,
         LoadBudgetSeconds = math.huge,
         DestroyBudgetSeconds = math.huge,
+
+        LoadBatch = {},
+        SizeBatch = {},
+        DestroyBatch = {},
+        ToCreate = {},
+        ToDestroy = {},
+        DestroyCandidates = {},
 
         Run = Run,
         Stats = GetStats,

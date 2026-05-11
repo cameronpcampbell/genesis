@@ -104,6 +104,7 @@ const function EnterRegion(
     local reconciler = self.Reconciler
     local desired = reconciler.Desired
     local loadQueue = reconciler.LoadQueue
+    local undesired = reconciler.Undesired
 
     local stepX = if fromX <= toX then 1 else -1
     local stepY = if fromY <= toY then 1 else -1
@@ -116,7 +117,13 @@ const function EnterRegion(
 
                 if desired[key] == nil then
                     desired[key] = true
-                    loadQueue:Push(key)
+                    if undesired[key] then
+                        -- Octree is still alive from a prior leave; just un-mark.
+                        undesired[key] = nil
+                        reconciler.UndesiredCount -= 1
+                    else
+                        loadQueue:Push(key)
+                    end
                 end
             end
         end
@@ -132,7 +139,11 @@ const function LeaveRegion(
 )
     debug.profilebegin("Genesis/Loader/LeaveRegion")
 
-    local desired = self.Reconciler.Desired
+    local reconciler = self.Reconciler
+    local desired = reconciler.Desired
+    local octrees = reconciler.Octrees
+    local createInflight = reconciler.CreateInflight
+    local undesired = reconciler.Undesired
 
     local stepX = if fromX <= toX then 1 else -1
     local stepY = if fromY <= toY then 1 else -1
@@ -141,7 +152,16 @@ const function LeaveRegion(
     for chunkX = fromX, toX, stepX do
         for chunkY = fromY, toY, stepY do
             for chunkZ = fromZ, toZ, stepZ do
-                desired[vector.create(chunkX, chunkY, chunkZ)] = nil
+                local key = vector.create(chunkX, chunkY, chunkZ)
+
+                desired[key] = nil
+
+                -- If the octree already exists and isn't mid-create, mark it for
+                -- destruction. Mid-create keys are picked up post-create.
+                if octrees[key] ~= nil and createInflight[key] == nil and undesired[key] == nil then
+                    undesired[key] = true
+                    reconciler.UndesiredCount += 1
+                end
             end
         end
     end
@@ -417,25 +437,15 @@ const function Step(self: ChunkLoader, deltaTime: number?)
     local reconciler = self.Reconciler
 
     if resolvedDt ~= nil then
-        local loadQueue = 0
-        local destroyQueue = 0
-        for key in reconciler.Desired do
-            if not reconciler.Octrees[key] and not reconciler.CreateInflight[key] then
-                loadQueue += 1
-            end
-        end
-        for key in reconciler.Octrees do
-            if not reconciler.Desired[key] and not reconciler.CreateInflight[key] then
-                destroyQueue += 1
-            end
-        end
-
+        -- LoadQueue:Len() is an upper bound on pending creates (stale entries
+        -- are discarded inside LoopBody). UndesiredCount is exact. Both are O(1)
+        -- and feed Budget.Adapt's burst-threshold heuristic.
         Budget.Adapt(
             self.Budget,
             resolvedDt,
             reconciler.LastChunkWorkSeconds,
-            loadQueue,
-            destroyQueue
+            reconciler.LoadQueue:Len(),
+            reconciler.UndesiredCount
         )
     end
 
