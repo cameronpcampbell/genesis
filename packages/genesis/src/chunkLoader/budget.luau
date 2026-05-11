@@ -21,6 +21,7 @@ const DEFAULT_SHRINK_FACTOR = 0.85
 const DEFAULT_SMOOTHING = 0.2
 const DEFAULT_OUTLIER_RATIO = 3.0
 const DEFAULT_QUIET_CHUNK_THRESHOLD = 0.0005
+const DEFAULT_OVERSHOOT_TOLERANCE = 1.15
 
 export type AdaptiveBudgetConfig = {
 	TargetFrameSeconds: number?,
@@ -37,6 +38,7 @@ export type AdaptiveBudgetConfig = {
 	Smoothing: number?,
 	OutlierRatio: number?,
 	QuietChunkThreshold: number?,
+	OvershootTolerance: number?,
 }
 
 export type BudgetConfig = {
@@ -60,6 +62,7 @@ export type AdaptiveBudgetParams = {
 	Smoothing: number,
 	OutlierRatio: number,
 	QuietChunkThreshold: number,
+	OvershootTolerance: number,
 }
 
 export type AdaptiveBudgetState = {
@@ -96,6 +99,7 @@ const function ResolveAdaptiveParams(config: AdaptiveBudgetConfig?): AdaptiveBud
 		Smoothing = config.Smoothing or DEFAULT_SMOOTHING,
 		OutlierRatio = config.OutlierRatio or DEFAULT_OUTLIER_RATIO,
 		QuietChunkThreshold = config.QuietChunkThreshold or DEFAULT_QUIET_CHUNK_THRESHOLD,
+		OvershootTolerance = config.OvershootTolerance or DEFAULT_OVERSHOOT_TOLERANCE,
 	}
 end
 
@@ -184,9 +188,11 @@ const function Adapt(
 
 	-- Smoothed frame already over target means the non-chunk baseline is stale
 	-- (background pressure rose) or chunk work is too high. Pull both budgets
-	-- down toward something that fits the observed overshoot.
-	if adaptive.SmoothedFrameSeconds > effectiveTarget then
-		local overshoot = adaptive.SmoothedFrameSeconds / effectiveTarget
+	-- down toward something that fits the observed overshoot. A tolerance band
+	-- keeps the shrink from firing on every frame that barely crosses target.
+	local shrinkThreshold = effectiveTarget * params.OvershootTolerance
+	if adaptive.SmoothedFrameSeconds > shrinkThreshold then
+		local overshoot = adaptive.SmoothedFrameSeconds / shrinkThreshold
 		local factor = math.max(params.ShrinkFactor, 1 / overshoot)
 		local shrunkChunk = adaptive.SmoothedChunkWorkSeconds * factor
 

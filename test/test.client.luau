@@ -23,7 +23,7 @@ local Loader = Genesis.New({
     RenderDistance = 8,
     ChunkSize = 2048 / (2 ^ OCTREE_LOD_AMOUNT),
     OctreeLodAmount = OCTREE_LOD_AMOUNT,
-    OctreeSplitFactor = 2.5,
+    OctreeSplitFactor = 3.5,
     Generator = Terra.MarchingCubes({
         Seed = 25
     })

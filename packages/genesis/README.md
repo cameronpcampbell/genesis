@@ -116,11 +116,11 @@ All fields are optional.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| TargetFrameSeconds | `0.0133` | Target frame time. The budget grows when frames are faster and shrinks when they are slower. |
+| TargetFrameSeconds | _auto_ | Target frame time. Auto-calibrated from quiet frames; pass an explicit value to override. |
 | LoadMin | `0.002` | Floor for the load budget. |
-| LoadMax | `0.008` | Ceiling for the load budget. |
+| LoadMax | `0.012` | Ceiling for the load budget. |
 | DestroyMin | `0.002` | Floor for the destroy budget. |
-| DestroyMax | `0.008` | Ceiling for the destroy budget. |
-| GrowStepSeconds | `0.0005` | Amount the budget increases per under-budget frame. |
+| DestroyMax | `0.012` | Ceiling for the destroy budget. |
 | ShrinkFactor | `0.85` | Multiplier applied to the budget on over-budget frames. |
+| OvershootTolerance | `1.15` | Fraction of target frame time the smoothed frame time must exceed before the budget shrinks. Raise it to let the budget hold near its ceiling under sustained chunk work, lower it for stricter throttling. |
 | Smoothing | `0.2` | EMA smoothing factor for frame time measurement. |
