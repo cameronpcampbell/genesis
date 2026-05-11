@@ -199,6 +199,9 @@ const function Chunk(
 
 	local values = table.create(chunkVoxelCount) :: ValuesTable
 
+	local stepValue = voxelSize * amplitude
+	local startValue = startY * amplitude
+
 	local idx2d, idx3d = 0, 0
 	for xIdx = 0, voxelRes do
 	    local x = startX + xIdx * voxelSize
@@ -213,12 +216,11 @@ const function Chunk(
 				seed, isoValue, amplitude
 			)
 
+			local val = value2d + startValue
 			for yIdx = 0, voxelRes do
-			    local y = startY + yIdx * voxelSize
 				idx3d += 1
-
-				local value: number = value2d + (y * amplitude)
-				values[idx3d] = value
+				values[idx3d] = val
+				val += stepValue
 			end
 		end
 	end
@@ -245,6 +247,7 @@ const function Chunk(
 	end
 
 	if #eMesh:GetFaces() == 0 then
+	    eMesh:Destroy()
 	    return nil
 	end
 
