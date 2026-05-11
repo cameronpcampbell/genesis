@@ -219,7 +219,7 @@ const function LoopBody(self: Reconciler)
 
             local key = destroyCandidates[idx]
             local octree = octrees[key]
-            local leaves = octree:Teardown()
+            local leaves = octree:Destroy()
 
             local destroyLen = #destroyBatch
             for lidx = 1, #leaves do

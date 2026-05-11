@@ -80,9 +80,9 @@ const function RunScenario(scenario: Scenario)
         end
     end
 
-    local teardownStart = os.clock()
-    local leftover = octree:Teardown()
-    local teardownMs = (os.clock() - teardownStart) * 1000
+    local destroyStart = os.clock()
+    local leftover = octree:Destroy()
+    local destroyMs = (os.clock() - destroyStart) * 1000
 
     table.sort(samples)
     table.sort(diffSamples)
@@ -98,8 +98,8 @@ const function RunScenario(scenario: Scenario)
         scenario.Name, rootSize, stats.Leaves, stats.Nodes
     ))
     print(string.format(
-        "  construct=%.3fms  cold SetTarget=%.3fms  teardown=%.3fms (released=%d)",
-        constructMs, coldMs, teardownMs, #leftover
+        "  construct=%.3fms  cold SetTarget=%.3fms  destroy=%.3fms (released=%d)",
+        constructMs, coldMs, destroyMs, #leftover
     ))
     print(string.format(
         "  path: avg=%.4fms p50=%.4fms p99=%.4fms  (skipped=%d/%d)",

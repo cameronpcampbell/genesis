@@ -29,7 +29,7 @@ if diff then
 end
 
 -- On shutdown.
-for _, center in octree:Teardown() do
+for _, center in octree:Destroy() do
     -- Despawn anything still rendered.
 end
 ```
@@ -65,7 +65,7 @@ type Diff = {
 
 Cells that become visible are grouped by size, since cells of the same LOD all share the same size vector. When non-nil, the returned tables are fresh and owned by the caller.
 
-### `octree:Teardown() -> { vector }`
+### `octree:Destroy() -> { vector }`
 
 Returns the centers of every currently-rendered leaf and marks them un-rendered. Call this when destroying the octree to drive final cleanup.
 
@@ -110,9 +110,9 @@ Script used for the benchmark can be found [here](./benchmark.server.luau).
 | Path avg       | 0.0164 ms | 0.2034 ms | 0.5460 ms |
 | Path p50       | 0.0002 ms | 0.2114 ms | 0.5573 ms |
 | Path p99       | 0.0918 ms | 0.5516 ms | 1.0195 ms |
-| Teardown       | 0.007 ms  | 0.027 ms  | 0.039 ms  |
+| Destroy        | 0.007 ms  | 0.027 ms  | 0.039 ms  |
 
 - **Construct**: `Strata.New` allocation + level-data setup.
 - **Cold SetTarget**: first `SetTarget` on a fresh octree, builds the whole tree.
 - **Path avg / p50 / p99**: per-call time across all 200 path steps, including no-op skips. p99 is the worst-frame budget.
-- **Teardown**: `octree:Teardown()` time to release every live leaf.
+- **Destroy**: `octree:Destroy()` time to release every live leaf.

@@ -357,7 +357,7 @@ const function New(config: MarchingCubesConfig?)
          Sample = function(pos: vector)
             return SurfaceNoise(
                 pos.x, pos.y, pos.z,
-                octaves, lacunarity, persistence, scale, amplitude,
+                octaves, lacunarity, persistence, scale,
                 seed, isoValue
             ) / amplitude
         end

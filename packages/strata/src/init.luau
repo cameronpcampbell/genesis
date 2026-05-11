@@ -72,7 +72,7 @@ export type Strata = {
 	SDFStack: { number },
 	CollapseStack: { Node },
 	SetTarget: (self: Strata, target: vector) -> Diff?,
-	Teardown: (self: Strata) -> { vector },
+	Destroy: (self: Strata) -> { vector },
 	Stats: (self: Strata, accumulator: Stats?) -> Stats,
 	Collect: (
 		self: Strata,
@@ -342,7 +342,7 @@ const function SetTarget(self: Strata, target: vector): Diff?
 	return diff
 end
 
-const function Teardown(self: Strata): { vector }
+const function Destroy(self: Strata): { vector }
 	local out = {}
 
 	CollectAllRendered(self.Root, out, self.TraversalStack)
@@ -524,7 +524,7 @@ function Strata.New(config: StrataConfig): Strata
 		SDFStack = table.create(64, 0) :: { number },
 		CollapseStack = table.create(64) :: { Node },
 		SetTarget = SetTarget,
-		Teardown = Teardown,
+		Destroy = Destroy,
 		Stats = GetStats,
 		Collect = Collect,
 	}
