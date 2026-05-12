@@ -16,6 +16,8 @@ A procedural terrain generation library for Roblox.
 - **[Strata](/packages/strata/README.md)**: A Library for handling octree generation.
 - **[Terra](/packages/terra/README.md)**: A collection of generators for Genesis.
 
+### Utilities
 - **[Pool](/packages/utils/pool/README.md)**: A generic object pool library.
 - **[RingBuffer](/packages/utils/ringBuffer/README.md)**: A ring buffer library.
 - **[EMeshQueue](/packages/utils/eMeshQueue/README.md)**: A first come, first serve queue for creating editable meshes.
+- **[Poisson](/packages/utils/poisson/README.md)**: A 2D Poisson disc sampler with per-class radii and a parent/child hierarchy.

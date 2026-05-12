@@ -1,6 +1,6 @@
 # Poisson
 
-Deterministic 2D Poisson disc sampler with multiple named classes, per-class radii and weights, and a parent/child hierarchy for placing decorations (sticks, pinecones) within the footprint of larger objects (trees).
+2D Poisson disc sampler with per-class radii and weights, and a parent/child hierarchy for placing decorations (sticks, pinecones) within the footprint of larger objects (trees).
 
 ## Usage
 
@@ -29,18 +29,18 @@ for _, sample in samples do
 end
 ```
 
-The same sampler can be reused across many seeds; each call to `Sample` is independent.
+The same sampler can be reused across many seeds. Each call to `Sample` is independent.
 
 ## Configuration
 
 Each node has:
 
-- `Radius` — exclusion radius. Two samples `A` and `B` satisfy `distance(A, B) >= rA + rB` (their radius discs do not overlap). One exception: a sample may overlap any of its ancestors so that children can lie inside their parent's footprint.
-- `Weight` — relative probability that a candidate position becomes this class versus its siblings. Higher weight, more samples.
-- `ChildSpawnRadius` — optional. Radius of the disc, centered on this sample, in which this node's children are scattered. Defaults to `Radius` when omitted. Has no effect on nodes without `Children`.
-- `Children` — optional table of nested nodes. Children are placed *within* their parent's `ChildSpawnRadius` after the parent is placed. Nesting is unbounded.
+- `Radius`: minimum allowed distance between this sample and any other. Ancestors are exempt so that children can fit within their parent's footprint.
+- `Weight`: relative probability versus its siblings. Higher weight means more samples of this class.
+- `ChildSpawnRadius`: optional. Radius of the disc, centered on this sample, in which this node's children are scattered. Defaults to `Radius` when omitted.
+- `Children`: optional table of nested nodes. Children are placed within their parent's `ChildSpawnRadius`. Nesting is unbounded.
 
-The output is a flat list of `{ Position: vector, Name: string }`. The hierarchy is only used during placement.
+The output is a flat list of `{ Position: vector, Name: string }`.
 
 ## API
 
@@ -50,4 +50,4 @@ Builds a sampler from a node tree. `config` is a table mapping node names to `No
 
 ### `sampler:Sample(seed, size) -> { Sample }`
 
-Returns a flat list of placed samples within the rectangle anchored at the origin: `x` in `[0, size.x)`, `y` in `[0, size.y)`. `seed` is forwarded to `Random.new`; identical `(seed, size)` returns identical output.
+Returns a flat list of placed samples within the rectangle anchored at the origin: `x` in `[0, size.x)`, `y` in `[0, size.y)`. Identical `(seed, size)` returns identical output.
