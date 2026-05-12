@@ -7,7 +7,7 @@ A procedural terrain generation library for Roblox.
 ## Features
 - Optional SVO LOD support.
 - Fast slab-based chunk loading that scales to large render distances.
-- Adaptive per-frame budgeting that spreads chunk generation across frames to prevent lag.
+- Adaptive budgeting that spreads chunk generation across frames to prevent lag.
 - Target prediction for responsiveness, preloads chunks slightly ahead of the target position.
 
 [Documentation](/packages/genesis/README.md)
