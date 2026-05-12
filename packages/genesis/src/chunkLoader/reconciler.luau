@@ -3,9 +3,15 @@
 
 local Strata = require(script.Parent.Parent.Parent.strata)
 
+export type InitConfig = {
+    ChunkSize: number,
+    OctreeLodAmount: number,
+}
+
 export type Generator = {
-    Create: (positionGroups: { { vector } }, sizes: { vector }) -> (),
-    Destroy: (positions: { vector }) -> (),
+    Init: (config: InitConfig) -> (),
+    Create: (position: vector, size: vector) -> (),
+    Destroy: (position: vector) -> (),
     Sample: (center: vector) -> number,
 }
 
@@ -255,9 +261,18 @@ const function LoopBody(self: Reconciler)
             break
         end
 
+        local totalCreateCount = 0
         if #loadBatch > 0 then
             local startClock = os.clock()
-            generator.Create(loadBatch, sizeBatch)
+            local create = generator.Create
+            for groupIdx = 1, #loadBatch do
+                local group = loadBatch[groupIdx]
+                local size = sizeBatch[groupIdx]
+                for idx = 1, #group do
+                    create(group[idx], size)
+                    totalCreateCount += 1
+                end
+            end
 
             -- Cleared keys whose desire flipped while create was in flight now
             -- become pending destroys.
@@ -273,13 +288,8 @@ const function LoopBody(self: Reconciler)
             local elapsed = os.clock() - startClock
             loadElapsed += elapsed
 
-            local totalCount = 0
-            for i = 1, #loadBatch do
-                totalCount += #loadBatch[i]
-            end
-
-            if totalCount > 0 then
-                local measured = elapsed / totalCount
+            if totalCreateCount > 0 then
+                local measured = elapsed / totalCreateCount
                 self.LoadItemCost =
                     COST_SMOOTHING * measured + (1 - COST_SMOOTHING) * self.LoadItemCost
             end
@@ -287,7 +297,11 @@ const function LoopBody(self: Reconciler)
 
         if #destroyBatch > 0 then
             local startClock = os.clock()
-            generator.Destroy(destroyBatch)
+            local destroy = generator.Destroy
+            local count = #destroyBatch
+            for idx = 1, count do
+                destroy(destroyBatch[idx])
+            end
 
             for idx = 1, toDestroyN do
                 destroyInflight[toDestroy[idx]] = nil
@@ -296,7 +310,6 @@ const function LoopBody(self: Reconciler)
             local elapsed = os.clock() - startClock
             destroyElapsed += elapsed
 
-            local count = #destroyBatch
             if count > 0 then
                 local measured = elapsed / count
 
@@ -377,6 +390,11 @@ end
 local Reconciler = {}
 
 function Reconciler.New(config: ReconcilerConfig): Reconciler
+    config.Generator.Init({
+        ChunkSize = config.BaseLeafSize,
+        OctreeLodAmount = config.LodAmount,
+    })
+
     return {
         Desired = {},
         LoadQueue = RingBuffer.New<<vector>>(LOAD_QUEUE_INITIAL_CAPACITY),

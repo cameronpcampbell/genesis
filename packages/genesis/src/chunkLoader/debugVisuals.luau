@@ -18,62 +18,51 @@ const function NewWireframeGenerator(): Generator
     local nodes: { [vector]: WireframeHandleAdornment } = {}
 
     return {
-        Create = function(positionGroups: { { vector } }, sizes: { vector })
-            for groupIdx = 1, #positionGroups do
-                local group = positionGroups[groupIdx]
-                local size = sizes[groupIdx]
+        Init = function(_config: Reconciler.InitConfig) end,
 
-                local lodBucket = math.round(math.log(size.x, 2))
-                local color = LOD_COLORS[(lodBucket % #LOD_COLORS) + 1]
+        Create = function(pos: vector, size: vector)
+            local lodBucket = math.round(math.log(size.x, 2))
+            local color = LOD_COLORS[(lodBucket % #LOD_COLORS) + 1]
 
-                local halfSize = (size :: any) :: Vector3 * 0.5
-                local corner1 = Vector3.new(-halfSize.X, -halfSize.Y, -halfSize.Z)
-                local corner2 = Vector3.new( halfSize.X, -halfSize.Y, -halfSize.Z)
-                local corner3 = Vector3.new( halfSize.X,  halfSize.Y, -halfSize.Z)
-                local corner4 = Vector3.new(-halfSize.X,  halfSize.Y, -halfSize.Z)
-                local corner5 = Vector3.new(-halfSize.X, -halfSize.Y,  halfSize.Z)
-                local corner6 = Vector3.new( halfSize.X, -halfSize.Y,  halfSize.Z)
-                local corner7 = Vector3.new( halfSize.X,  halfSize.Y,  halfSize.Z)
-                local corner8 = Vector3.new(-halfSize.X,  halfSize.Y,  halfSize.Z)
+            local halfSize = (size :: any) :: Vector3 * 0.5
+            local corner1 = Vector3.new(-halfSize.X, -halfSize.Y, -halfSize.Z)
+            local corner2 = Vector3.new( halfSize.X, -halfSize.Y, -halfSize.Z)
+            local corner3 = Vector3.new( halfSize.X,  halfSize.Y, -halfSize.Z)
+            local corner4 = Vector3.new(-halfSize.X,  halfSize.Y, -halfSize.Z)
+            local corner5 = Vector3.new(-halfSize.X, -halfSize.Y,  halfSize.Z)
+            local corner6 = Vector3.new( halfSize.X, -halfSize.Y,  halfSize.Z)
+            local corner7 = Vector3.new( halfSize.X,  halfSize.Y,  halfSize.Z)
+            local corner8 = Vector3.new(-halfSize.X,  halfSize.Y,  halfSize.Z)
 
-                for idx = 1, #group do
-                    local pos = group[idx]
+            local adornment = Instance.new("WireframeHandleAdornment")
+            adornment.CFrame = CFrame.new((pos :: any) :: Vector3)
+            adornment.Adornee = workspace.Terrain
+            adornment.Color3 = color
 
-                    local adornment = Instance.new("WireframeHandleAdornment")
-                    adornment.CFrame = CFrame.new((pos :: any) :: Vector3)
-                    adornment.Adornee = workspace.Terrain
-                    adornment.Color3 = color
+            adornment:AddLine(corner1, corner2)
+            adornment:AddLine(corner2, corner3)
+            adornment:AddLine(corner3, corner4)
+            adornment:AddLine(corner4, corner1)
+            adornment:AddLine(corner5, corner6)
+            adornment:AddLine(corner6, corner7)
+            adornment:AddLine(corner7, corner8)
+            adornment:AddLine(corner8, corner5)
+            adornment:AddLine(corner1, corner5)
+            adornment:AddLine(corner2, corner6)
+            adornment:AddLine(corner3, corner7)
+            adornment:AddLine(corner4, corner8)
 
-                    adornment:AddLine(corner1, corner2)
-                    adornment:AddLine(corner2, corner3)
-                    adornment:AddLine(corner3, corner4)
-                    adornment:AddLine(corner4, corner1)
-                    adornment:AddLine(corner5, corner6)
-                    adornment:AddLine(corner6, corner7)
-                    adornment:AddLine(corner7, corner8)
-                    adornment:AddLine(corner8, corner5)
-                    adornment:AddLine(corner1, corner5)
-                    adornment:AddLine(corner2, corner6)
-                    adornment:AddLine(corner3, corner7)
-                    adornment:AddLine(corner4, corner8)
+            adornment.Parent = workspace.Terrain
 
-                    adornment.Parent = workspace.Terrain
-
-                    nodes[pos] = adornment
-                end
-            end
+            nodes[pos] = adornment
         end,
 
-        Destroy = function(positions: { vector })
-            for idx = 1, #positions do
-                local pos = positions[idx]
-                local adornment = nodes[pos]
+        Destroy = function(pos: vector)
+            local adornment = nodes[pos]
+            if not adornment then return end
 
-                if not adornment then continue end
-
-                adornment:Destroy()
-                nodes[pos] = nil
-            end
+            adornment:Destroy()
+            nodes[pos] = nil
         end,
 
         Sample = function(_center: vector)
@@ -91,14 +80,19 @@ export type DebugVisuals = {
 
 const function MakeTee(real: Generator, debug: Generator): Generator
     return {
-        Create = function(positionGroups: { { vector } }, sizes: { vector })
-            real.Create(positionGroups, sizes)
-            debug.Create(positionGroups, sizes)
+        Init = function(config: Reconciler.InitConfig)
+            real.Init(config)
+            debug.Init(config)
         end,
 
-        Destroy = function(positions: { vector })
-            real.Destroy(positions)
-            debug.Destroy(positions)
+        Create = function(pos: vector, size: vector)
+            real.Create(pos, size)
+            debug.Create(pos, size)
+        end,
+
+        Destroy = function(pos: vector)
+            real.Destroy(pos)
+            debug.Destroy(pos)
         end,
 
         Sample = real.Sample,
@@ -119,22 +113,6 @@ const function CollectAlive(
     return groups, sizes
 end
 
-const function FlattenGroups(groups: { { vector } }): { vector }
-    local positions: { vector } = {}
-    local count = 0
-
-    for groupIdx = 1, #groups do
-        local group = groups[groupIdx]
-
-        for posIdx = 1, #group do
-            count += 1
-            positions[count] = group[posIdx]
-        end
-    end
-
-    return positions
-end
-
 const function SetEnabled(self: DebugVisuals, enabled: boolean)
     if (self.DebugGenerator ~= nil) == enabled then return end
 
@@ -144,8 +122,12 @@ const function SetEnabled(self: DebugVisuals, enabled: boolean)
         local debugGen = NewWireframeGenerator()
 
         local groups, sizes = CollectAlive(reconciler)
-        if #groups > 0 then
-            debugGen.Create(groups, sizes)
+        for groupIdx = 1, #groups do
+            local group = groups[groupIdx]
+            local size = sizes[groupIdx]
+            for posIdx = 1, #group do
+                debugGen.Create(group[posIdx], size)
+            end
         end
 
         self.RealGenerator = reconciler.Generator
@@ -157,10 +139,11 @@ const function SetEnabled(self: DebugVisuals, enabled: boolean)
         local realGen = self.RealGenerator :: Generator
 
         local groups, _sizes = CollectAlive(reconciler)
-        local positions = FlattenGroups(groups)
-
-        if #positions > 0 then
-            debugGen.Destroy(positions)
+        for groupIdx = 1, #groups do
+            local group = groups[groupIdx]
+            for posIdx = 1, #group do
+                debugGen.Destroy(group[posIdx])
+            end
         end
 
         reconciler.Generator = realGen

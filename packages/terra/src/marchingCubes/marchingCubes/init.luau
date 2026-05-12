@@ -180,6 +180,7 @@ end
 
 const function Chunk(
     xOffset: number, yOffset: number, zOffset: number, chunkSize: number,
+    canCollide: boolean,
     eMeshQueue: EMeshQueue.EMeshQueue,
     seed: number, isoValue: number, chunkVoxelCount: number,
     voxelRes: number, voxelResInner: number, voxelResOuter: number,
@@ -251,7 +252,20 @@ const function Chunk(
 	    return nil
 	end
 
-	local mesh = AssetService:CreateMeshPartAsync(Content.fromObject(eMesh))
+	local collisionFidelity = if canCollide
+	    then Enum.CollisionFidelity.Default
+	    else Enum.CollisionFidelity.Box
+
+	local ok, mesh = pcall(
+	    AssetService.CreateMeshPartAsync, AssetService,
+		Content.fromObject(eMesh),
+		{ CollisionFidelity = collisionFidelity } :: { [string]: any }
+	)
+
+	if not ok then
+	    eMesh:Destroy()
+        return nil
+	end
 
 	mesh.Position = vector.create(startX, startY, startZ) :: any
 
@@ -261,11 +275,14 @@ const function Chunk(
 		(bounds.MaxZ - bounds.MinZ) * voxelSize
 	) :: any
 
-	local lodBucket = math.round(math.log(chunkSize, 2))
-	mesh.Color = LOD_COLORS[(lodBucket % #LOD_COLORS) + 1]
+	mesh.Color = Color3.fromHex("348C31")
+	mesh.Material = Enum.Material.Grass
+
+	--local lodBucket = math.round(math.log(chunkSize, 2))
+	--mesh.Color = LOD_COLORS[(lodBucket % #LOD_COLORS) + 1]
 
 	mesh.Anchored = true
-	mesh.CanCollide = false
+	mesh.CanCollide = canCollide
 	mesh.Parent = workspace
 
 	return mesh
@@ -299,9 +316,10 @@ const function New(config: MarchingCubesConfig?)
     	moveUp + MOVE_RIGHT
 
      return {
-         Chunk = function(xOffset: number, yOffset: number, zOffset: number, chunkSize: number)
+         Chunk = function(xOffset: number, yOffset: number, zOffset: number, chunkSize: number, canCollide: boolean)
              return Chunk(
                  xOffset, yOffset, zOffset, chunkSize,
+                 canCollide,
                  eMeshQueue,
                  seed, isoValue, chunkVoxelCount,
                  voxelRes, voxelResInner, voxelResOuter,

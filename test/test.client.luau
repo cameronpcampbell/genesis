@@ -12,10 +12,10 @@ local SpawnLocation =
     workspace:WaitForChild("SpawnLocation") :: SpawnLocation
 SpawnLocation.Transparency = 1
 
-local Baseplate =
+--[[local Baseplate =
     workspace:WaitForChild("Baseplate") :: BasePart
 Baseplate.Transparency = 1
-local BaseplatePosY = Baseplate.Position.Y
+local BaseplatePosY = Baseplate.Position.Y]]
 
 const OCTREE_LOD_AMOUNT = 4
 
@@ -29,7 +29,7 @@ local Loader = Genesis.New({
     })
 })
 
-Loader:SetDebugVisuals(true)
+--Loader:SetDebugVisuals(true)
 
 const DEBUG_INTERVAL = 1.0
 local DebugAccum = 0.0
@@ -37,12 +37,12 @@ local DebugAccum = 0.0
 game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
     Loader:Step(deltaTime)
 
-    if Baseplate and Char then
-        local position = (Char :: any).HumanoidRootPart.Position
+    --if Baseplate and Char then
+        --local position = (Char :: any).HumanoidRootPart.Position
 
-        Baseplate.Position =
-            vector.create(position.X, BaseplatePosY, position.Z) :: any
-    end
+        --Baseplate.Position =
+            --vector.create(position.X, BaseplatePosY, position.Z) :: any
+            --end
 
     DebugAccum += deltaTime
     if DebugAccum < DEBUG_INTERVAL then return end

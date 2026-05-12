@@ -84,13 +84,13 @@ A generator is any table with `Create`, `Destroy`, and `Sample` fields.
 
 ```lua
 type Generator = {
-    Create: (positionGroups: { { vector } }, sizes: { vector }) -> (),
-    Destroy: (positions: { vector }) -> (),
+    Create: (position: vector, size: vector) -> (),
+    Destroy: (position: vector) -> (),
     Sample: (center: vector) -> number,
 }
 ```
 
-`Create` receives positions grouped by size: `positionGroups[i]` holds all chunk centers at `sizes[i]`. `Destroy` receives a flat list of centers to remove. `Sample` is the SDF probe Strata uses for SVO culling (see [Strata](/packages/strata/README.md)).
+`Create` and `Destroy` are called once per chunk (one octree node) with the chunk's center position. `Create` also receives the chunk's size vector. `Sample` is the SDF probe Strata uses for SVO culling (see [Strata](/packages/strata/README.md)).
 
 ## Budget
 
