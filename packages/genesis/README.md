@@ -1,6 +1,6 @@
 # Genesis
 
-Chunk loading system for Luau. Manages procedural world chunks around a target position with octree-based LOD and adaptive budgeting to ensure smooth performance.
+Chunk loading system for Luau. Manages procedural world chunks around a target position with octree-based LOD and a residence-time SLO controller that scales per-frame work to keep chunks settling within a target deadline.
 
 ## Usage
 
@@ -34,9 +34,12 @@ end)
 | OctreeSplitFactor | `number?` | no | Controls how far each LOD ring extends from the target. Defaults to `1.0`. Larger values push coarser detail farther out. |
 | Generator | `Generator` | yes | Object that creates and destroys chunk geometry. |
 | RenderDistance | `number` | yes | Radius in root node units around the target to keep loaded. |
+| NearBandRadius | `number?` | no | Chebyshev radius (in root nodes) of the near band. Defaults to `RenderDistance / 3`. |
+| MidBandRadius | `number?` | no | Chebyshev radius of the mid band. Defaults to `2 * RenderDistance / 3`. |
+| LoadBandPriority | `{ number }?` | no | Initial allocation weights for `{ Near, Mid, Far }`. Defaults to `{ 3, 2, 1 }`. Splits the seed load budget across per-band buckets (see [Band Budgets](#band-budgets)). |
 | Target | `any?` | no | Initial target. Can be a `BasePart` or `vector`. |
 | TargetPosition | `(target: any) -> vector?` | no | Custom function to extract a position from the target. Defaults to reading `BasePart.Position` or passing a vector through. |
-| Budget | `BudgetConfig?` | no | Per-frame time budget for loading and destroying. See [Budget](#budget). |
+| Budget | `BudgetConfig?` | no | Budgeting configuration. See [Budget](#budget). |
 
 ### `loader:Step(deltaTime: number?)`
 
@@ -64,11 +67,18 @@ type LoaderStats = {
     },
     Queues: {
         Load: number,
+        LoadByBand: { number },
         Destroy: number,
     },
     Budget: {
-        LoadSeconds: number,
+        LoadSeconds: { number },
         DestroySeconds: number,
+    },
+    SLO: {
+        LoadResidenceP95: { number },
+        DestroyResidenceP95: number,
+        LoadHoLAgeSeconds: { number },
+        DestroyHoLAgeSeconds: number,
     },
     Octree: {
         Leaves: number,
@@ -77,6 +87,16 @@ type LoaderStats = {
     },
 }
 ```
+
+`Queues.Load` is the total count of pending new root creations. `Queues.LoadByBand` reports pending creates per band as `{ Near, Mid, Far }`.
+
+`Budget.LoadSeconds` is the current per-frame load budget for each band, indexed as `{ Near, Mid, Far }`. `SLO.LoadResidenceP95` and `SLO.LoadHoLAgeSeconds` are likewise per-band. `SLO.DestroyResidenceP95` and `SLO.DestroyHoLAgeSeconds` are scalars.
+
+## Band Budgets
+
+Chunks are classified into three bands by Chebyshev distance from the target: Near (closest), Mid, and Far. Each band has its own per-frame load budget bucket. Diff-loop refinement on existing octrees and new-root creation from the load queue both spend from the bucket matching the chunk's band, so a heavy Near refinement pass can't starve Far root creation at the leading edge of movement.
+
+`LoadBandPriority` seeds the initial split: with the default `{ 3, 2, 1 }`, the seed load budget divides 50% Near / 33% Mid / 17% Far. From there each band's bucket adapts independently against its own residence histogram, growing where chunks are settling slowly and shrinking where they're settling quickly. Destruction uses a single unbanded budget.
 
 ## Generator
 
@@ -94,7 +114,7 @@ type Generator = {
 
 ## Budget
 
-Budget controls how much time per frame the loader spends creating and destroying chunks. Adaptive budgeting is enabled by default and adjusts limits based on frame time.
+The loader uses a residence-time SLO controller: per-band load buckets and the destroy budget scale each frame to keep the 95th percentile of chunk residence time under a target deadline. When the queues are healthy, budgets shrink and frame time stays flat; when chunks start piling up, the affected bucket grows toward a ceiling that lifts during heavy backlogs so the system catches up rather than desyncing. Each band's bucket adapts independently from its own residence histogram.
 
 ```lua
 type BudgetConfig = {
@@ -106,9 +126,9 @@ type BudgetConfig = {
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| LoadSeconds | `0.004` | Seconds per frame allocated to chunk creation. |
-| DestroySeconds | `0.004` | Seconds per frame allocated to chunk destruction. |
-| Adaptive | `true` | Set to `false` to disable adaptive budgeting, or pass an `AdaptiveBudgetConfig` to tune it. |
+| LoadSeconds | `0.004` | Initial seconds per frame for chunk creation. Split across band buckets by `LoadBandPriority`. |
+| DestroySeconds | `0.004` | Initial seconds per frame allocated to chunk destruction. |
+| Adaptive | `true` | Set to `false` to pin budgets to the initial seeds, or pass an `AdaptiveBudgetConfig` to tune the SLO controller. |
 
 ### `AdaptiveBudgetConfig`
 
@@ -116,11 +136,14 @@ All fields are optional.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| TargetFrameSeconds | _auto_ | Target frame time. Auto-calibrated from quiet frames; pass an explicit value to override. |
-| LoadMin | `0.002` | Floor for the load budget. |
-| LoadMax | `0.012` | Ceiling for the load budget. |
-| DestroyMin | `0.002` | Floor for the destroy budget. |
-| DestroyMax | `0.012` | Ceiling for the destroy budget. |
-| ShrinkFactor | `0.85` | Multiplier applied to the budget on over-budget frames. |
-| OvershootTolerance | `1.15` | Fraction of target frame time the smoothed frame time must exceed before the budget shrinks. Raise it to let the budget hold near its ceiling under sustained chunk work, lower it for stricter throttling. |
+| TargetResidenceSeconds | `2.0` | Target chunk residence time (enqueue to completion) for `TargetPercentile`. |
+| TargetPercentile | `0.95` | Fraction of chunks that should complete within `TargetResidenceSeconds`. |
+| NormalMaxBudgetSeconds | `0.012` | Per-bucket ceiling under typical load (applies to each load band bucket and the destroy budget). |
+| BacklogMaxBudgetSeconds | `0.050` | Per-bucket ceiling when that bucket is in backlog or starvation. Lifts the frame-time guard rail to let the system catch up. |
+| BacklogQueueThreshold | `256` | Per-bucket queue length that activates the backlog ceiling for that bucket. |
+| StarvationCeilingSeconds | `8.0` | Head-of-line age that forces the budget straight to `BacklogMaxBudgetSeconds`. |
+| MinBudgetSeconds | `0.002` | Floor on the per-frame budget. |
+| GrowthRate | `1.25` | Per-frame multiplier cap when residence is over target. |
+| ShrinkRate | `0.90` | Per-frame multiplier floor when residence is under target. |
+| TargetFrameSeconds | _auto_ | Calibrated from quiet frames; pass an explicit value to override. |
 | Smoothing | `0.2` | EMA smoothing factor for frame time measurement. |

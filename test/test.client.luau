@@ -29,7 +29,7 @@ local Loader = Genesis.New({
     })
 })
 
---Loader:SetDebugVisuals(true)
+Loader:SetDebugVisuals(true)
 
 const DEBUG_INTERVAL = 1.0
 local DebugAccum = 0.0

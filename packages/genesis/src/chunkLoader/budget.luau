@@ -2,249 +2,312 @@
 --!native
 --!nolint LocalShadow
 
+local ResidenceHistogram = require(script.Parent.residenceHistogram)
+type ResidenceHistogram = ResidenceHistogram.ResidenceHistogram
+
+const BAND_COUNT = 3
+
 const WARMUP_FRAMES = 5
 const MIN_QUIET_FRAMES = 5
 
 const DEFAULT_LOAD_BUDGET_SECONDS = 0.004
 const DEFAULT_DESTROY_BUDGET_SECONDS = 0.004
 const DEFAULT_FALLBACK_TARGET_SECONDS = 1 / 60
-const DEFAULT_LOAD_MIN = 0.002
-const DEFAULT_LOAD_MAX = 0.012
-const DEFAULT_DESTROY_MIN = 0.002
-const DEFAULT_DESTROY_MAX = 0.012
-const DEFAULT_LOAD_BURST_MAX = 0.025
-const DEFAULT_DESTROY_BURST_MAX = 0.025
-const DEFAULT_UTILIZATION = 0.7
-const DEFAULT_BURST_UTILIZATION = 0.9
-const DEFAULT_BURST_QUEUE_THRESHOLD = 32
-const DEFAULT_SHRINK_FACTOR = 0.85
+
+const DEFAULT_LOAD_BAND_PRIORITY = { 3, 2, 1 }
+
+const DEFAULT_TARGET_RESIDENCE_SECONDS = 2.0
+const DEFAULT_TARGET_PERCENTILE = 0.95
+const DEFAULT_STARVATION_CEILING_SECONDS = 8.0
+const DEFAULT_BACKLOG_QUEUE_THRESHOLD = 256
+const DEFAULT_BACKLOG_MAX_BUDGET_SECONDS = 0.050
+const DEFAULT_NORMAL_MAX_BUDGET_SECONDS = 0.012
+const DEFAULT_MIN_BUDGET_SECONDS = 0.002
+const DEFAULT_GROWTH_RATE = 1.25
+const DEFAULT_SHRINK_RATE = 0.90
 const DEFAULT_SMOOTHING = 0.2
-const DEFAULT_OUTLIER_RATIO = 3.0
 const DEFAULT_QUIET_CHUNK_THRESHOLD = 0.0005
-const DEFAULT_OVERSHOOT_TOLERANCE = 1.15
+const DEFAULT_HISTOGRAM_DECAY = 0.98
 
 export type AdaptiveBudgetConfig = {
-	TargetFrameSeconds: number?,
-	LoadMin: number?,
-	LoadMax: number?,
-	DestroyMin: number?,
-	DestroyMax: number?,
-	LoadBurstMax: number?,
-	DestroyBurstMax: number?,
-	Utilization: number?,
-	BurstUtilization: number?,
-	BurstQueueThreshold: number?,
-	ShrinkFactor: number?,
-	Smoothing: number?,
-	OutlierRatio: number?,
-	QuietChunkThreshold: number?,
-	OvershootTolerance: number?,
+    TargetFrameSeconds: number?,
+    TargetResidenceSeconds: number?,
+    TargetPercentile: number?,
+    StarvationCeilingSeconds: number?,
+    BacklogQueueThreshold: number?,
+    BacklogMaxBudgetSeconds: number?,
+    NormalMaxBudgetSeconds: number?,
+    MinBudgetSeconds: number?,
+    GrowthRate: number?,
+    ShrinkRate: number?,
+    Smoothing: number?,
+    QuietChunkThreshold: number?,
+    HistogramDecay: number?,
 }
 
 export type BudgetConfig = {
-	LoadSeconds: number?,
-	DestroySeconds: number?,
-	Adaptive: (AdaptiveBudgetConfig | boolean)?,
+    LoadSeconds: number?,
+    DestroySeconds: number?,
+    Adaptive: (AdaptiveBudgetConfig | boolean)?,
 }
 
 export type AdaptiveBudgetParams = {
-	TargetFrameSeconds: number?,
-	LoadMin: number,
-	LoadMax: number,
-	DestroyMin: number,
-	DestroyMax: number,
-	LoadBurstMax: number,
-	DestroyBurstMax: number,
-	Utilization: number,
-	BurstUtilization: number,
-	BurstQueueThreshold: number,
-	ShrinkFactor: number,
-	Smoothing: number,
-	OutlierRatio: number,
-	QuietChunkThreshold: number,
-	OvershootTolerance: number,
+    TargetFrameSeconds: number?,
+    TargetResidenceSeconds: number,
+    TargetPercentile: number,
+    StarvationCeilingSeconds: number,
+    BacklogQueueThreshold: number,
+    BacklogMaxBudgetSeconds: number,
+    NormalMaxBudgetSeconds: number,
+    MinBudgetSeconds: number,
+    GrowthRate: number,
+    ShrinkRate: number,
+    Smoothing: number,
+    QuietChunkThreshold: number,
+    HistogramDecay: number,
 }
 
 export type AdaptiveBudgetState = {
-	Params: AdaptiveBudgetParams,
-	SmoothedFrameSeconds: number,
-	SmoothedChunkWorkSeconds: number,
-	BaselineNonChunkSeconds: number,
-	DetectedTargetSeconds: number,
-	FramesSeen: number,
-	QuietFramesSeen: number,
+    Params: AdaptiveBudgetParams,
+    SmoothedFrameSeconds: number,
+    SmoothedChunkWorkSeconds: number,
+    BaselineNonChunkSeconds: number,
+    DetectedTargetSeconds: number,
+    FramesSeen: number,
+    QuietFramesSeen: number,
+    LastLoadP95: { number },
+    LastLoadHoLAge: { number },
+    LastDestroyP95: number,
+    LastDestroyHoLAge: number,
 }
 
 export type BudgetState = {
-	LoadSeconds: number,
-	DestroySeconds: number,
-	Adaptive: AdaptiveBudgetState?,
+    LoadSeconds: { number },
+    DestroySeconds: number,
+    Adaptive: AdaptiveBudgetState?,
 }
 
 const function ResolveAdaptiveParams(config: AdaptiveBudgetConfig?): AdaptiveBudgetParams
-	local config: AdaptiveBudgetConfig = config or {}
+    local config: AdaptiveBudgetConfig = config or {}
 
-	return {
-		TargetFrameSeconds = config.TargetFrameSeconds,
-		LoadMin = config.LoadMin or DEFAULT_LOAD_MIN,
-		LoadMax = config.LoadMax or DEFAULT_LOAD_MAX,
-		DestroyMin = config.DestroyMin or DEFAULT_DESTROY_MIN,
-		DestroyMax = config.DestroyMax or DEFAULT_DESTROY_MAX,
-		LoadBurstMax = config.LoadBurstMax or DEFAULT_LOAD_BURST_MAX,
-		DestroyBurstMax = config.DestroyBurstMax or DEFAULT_DESTROY_BURST_MAX,
-		Utilization = config.Utilization or DEFAULT_UTILIZATION,
-		BurstUtilization = config.BurstUtilization or DEFAULT_BURST_UTILIZATION,
-		BurstQueueThreshold = config.BurstQueueThreshold or DEFAULT_BURST_QUEUE_THRESHOLD,
-		ShrinkFactor = config.ShrinkFactor or DEFAULT_SHRINK_FACTOR,
-		Smoothing = config.Smoothing or DEFAULT_SMOOTHING,
-		OutlierRatio = config.OutlierRatio or DEFAULT_OUTLIER_RATIO,
-		QuietChunkThreshold = config.QuietChunkThreshold or DEFAULT_QUIET_CHUNK_THRESHOLD,
-		OvershootTolerance = config.OvershootTolerance or DEFAULT_OVERSHOOT_TOLERANCE,
-	}
+    return {
+        TargetFrameSeconds = config.TargetFrameSeconds,
+        TargetResidenceSeconds = config.TargetResidenceSeconds or DEFAULT_TARGET_RESIDENCE_SECONDS,
+        TargetPercentile = config.TargetPercentile or DEFAULT_TARGET_PERCENTILE,
+        StarvationCeilingSeconds = config.StarvationCeilingSeconds or DEFAULT_STARVATION_CEILING_SECONDS,
+        BacklogQueueThreshold = config.BacklogQueueThreshold or DEFAULT_BACKLOG_QUEUE_THRESHOLD,
+        BacklogMaxBudgetSeconds = config.BacklogMaxBudgetSeconds or DEFAULT_BACKLOG_MAX_BUDGET_SECONDS,
+        NormalMaxBudgetSeconds = config.NormalMaxBudgetSeconds or DEFAULT_NORMAL_MAX_BUDGET_SECONDS,
+        MinBudgetSeconds = config.MinBudgetSeconds or DEFAULT_MIN_BUDGET_SECONDS,
+        GrowthRate = config.GrowthRate or DEFAULT_GROWTH_RATE,
+        ShrinkRate = config.ShrinkRate or DEFAULT_SHRINK_RATE,
+        Smoothing = config.Smoothing or DEFAULT_SMOOTHING,
+        QuietChunkThreshold = config.QuietChunkThreshold or DEFAULT_QUIET_CHUNK_THRESHOLD,
+        HistogramDecay = config.HistogramDecay or DEFAULT_HISTOGRAM_DECAY,
+    }
+end
+
+const function AdaptSlice(
+    currentSeconds: number,
+    hist: ResidenceHistogram,
+    queueLen: number,
+    holAgeSeconds: number,
+    params: AdaptiveBudgetParams
+): (number, number, number)
+    hist:Decay(params.HistogramDecay)
+
+    debug.profilebegin("Genesis/Budget/ResidenceP95")
+    local currentP95 = hist:Percentile(params.TargetPercentile)
+    debug.profileend()
+
+    local targetResidence = params.TargetResidenceSeconds
+    local hasWork = queueLen > 0
+    local backlog =
+        queueLen > params.BacklogQueueThreshold
+        or holAgeSeconds > params.StarvationCeilingSeconds
+
+    local multiplier: number
+    if currentP95 > 0 then
+        multiplier = math.clamp(
+            currentP95 / targetResidence, params.ShrinkRate, params.GrowthRate)
+    elseif hasWork then
+        multiplier = params.GrowthRate
+    else
+        multiplier = params.ShrinkRate
+    end
+
+    local newSeconds = currentSeconds * multiplier
+
+    local maxBudget =
+        if backlog then params.BacklogMaxBudgetSeconds else params.NormalMaxBudgetSeconds
+
+    if holAgeSeconds > params.StarvationCeilingSeconds then
+        newSeconds = params.BacklogMaxBudgetSeconds
+    end
+
+    local resolved = math.clamp(newSeconds, params.MinBudgetSeconds, maxBudget)
+    return resolved, currentP95, holAgeSeconds
 end
 
 const function Adapt(
-	budget: BudgetState,
-	frameDt: number,
-	chunkWorkSeconds: number,
-	loadQueueLen: number,
-	destroyQueueLen: number
+    budget: BudgetState,
+    loadResidenceHists: { ResidenceHistogram },
+    destroyResidenceHist: ResidenceHistogram,
+    frameDt: number,
+    chunkWorkSeconds: number,
+    loadQueueLens: { number },
+    destroyQueueLen: number,
+    loadHoLAges: { number },
+    destroyHoLAge: number
 )
-	local adaptive = budget.Adaptive
-	if not adaptive then return end
+    local adaptive = budget.Adaptive
+    if not adaptive then return end
 
-	debug.profilebegin("Genesis/Budget/Adapt")
+    debug.profilebegin("Genesis/Budget/Adapt")
 
-	local params = adaptive.Params
-	local smoothing = params.Smoothing
+    local params = adaptive.Params
+    local smoothing = params.Smoothing
 
-	adaptive.SmoothedFrameSeconds =
-	    smoothing * frameDt + (1 - smoothing) * adaptive.SmoothedFrameSeconds
-	adaptive.SmoothedChunkWorkSeconds =
-	    smoothing * chunkWorkSeconds + (1 - smoothing) * adaptive.SmoothedChunkWorkSeconds
+    adaptive.SmoothedFrameSeconds =
+        smoothing * frameDt + (1 - smoothing) * adaptive.SmoothedFrameSeconds
+    adaptive.SmoothedChunkWorkSeconds =
+        smoothing * chunkWorkSeconds + (1 - smoothing) * adaptive.SmoothedChunkWorkSeconds
 
-	-- Without active queues there is no chunk pressure, so frameDt represents the
-	-- engine's per-frame floor. Use these frames to calibrate the non-chunk
-	-- baseline and the device's refresh interval.
-	local isQuietFrame =
-	    chunkWorkSeconds < params.QuietChunkThreshold
-		and loadQueueLen == 0
-		and destroyQueueLen == 0
+    -- Quiet frames calibrate the engine's per-frame floor and non-chunk
+    -- baseline, used as the implicit TargetFrameSeconds when the caller
+    -- doesn't pin one explicitly.
+    local totalLoadQueueLen = 0
+    for band = 1, BAND_COUNT do
+        totalLoadQueueLen += loadQueueLens[band]
+    end
 
-	if isQuietFrame then
-		adaptive.BaselineNonChunkSeconds =
-		    smoothing * frameDt + (1 - smoothing) * adaptive.BaselineNonChunkSeconds
+    local isQuietFrame =
+        chunkWorkSeconds < params.QuietChunkThreshold
+        and totalLoadQueueLen == 0
+        and destroyQueueLen == 0
 
-		if frameDt < adaptive.DetectedTargetSeconds then
-			adaptive.DetectedTargetSeconds = frameDt
-		end
+    if isQuietFrame then
+        adaptive.BaselineNonChunkSeconds =
+            smoothing * frameDt + (1 - smoothing) * adaptive.BaselineNonChunkSeconds
 
-		adaptive.QuietFramesSeen += 1
-	end
+        if frameDt < adaptive.DetectedTargetSeconds then
+            adaptive.DetectedTargetSeconds = frameDt
+        end
 
-	adaptive.FramesSeen += 1
+        adaptive.QuietFramesSeen += 1
+    end
 
-	if adaptive.FramesSeen <= WARMUP_FRAMES then
-		debug.profileend()
-		return
-	end
+    adaptive.FramesSeen += 1
+    if adaptive.FramesSeen <= WARMUP_FRAMES then
+        debug.profileend()
+        return
+    end
 
-	local effectiveTarget: number
+    local loadSeconds = budget.LoadSeconds
+    local lastLoadP95 = adaptive.LastLoadP95
+    local lastLoadHoLAge = adaptive.LastLoadHoLAge
 
-	if params.TargetFrameSeconds ~= nil then
-		effectiveTarget = params.TargetFrameSeconds
+    for band = 1, BAND_COUNT do
+        local resolved, p95, holAge = AdaptSlice(
+            loadSeconds[band],
+            loadResidenceHists[band],
+            loadQueueLens[band],
+            loadHoLAges[band],
+            params
+        )
+        loadSeconds[band] = resolved
+        lastLoadP95[band] = p95
+        lastLoadHoLAge[band] = holAge
+    end
 
-	elseif adaptive.QuietFramesSeen >= MIN_QUIET_FRAMES then
-		effectiveTarget = adaptive.DetectedTargetSeconds
+    local destroyResolved, destroyP95, destroyHoL = AdaptSlice(
+        budget.DestroySeconds,
+        destroyResidenceHist,
+        destroyQueueLen,
+        destroyHoLAge,
+        params
+    )
+    budget.DestroySeconds = destroyResolved
+    adaptive.LastDestroyP95 = destroyP95
+    adaptive.LastDestroyHoLAge = destroyHoL
 
-	else
-		effectiveTarget = DEFAULT_FALLBACK_TARGET_SECONDS
-	end
-
-	-- One-off hitches (yields, GC, asset loads) shouldn't shrink the budget.
-	if frameDt > effectiveTarget * params.OutlierRatio then
-		debug.profileend()
-		return
-	end
-
-	local baseline = adaptive.BaselineNonChunkSeconds
-	if baseline <= 0 then
-		baseline = math.max(0, adaptive.SmoothedFrameSeconds - adaptive.SmoothedChunkWorkSeconds)
-	end
-
-	local headroom = math.max(0, effectiveTarget - baseline)
-
-	local loadBurst = loadQueueLen >= params.BurstQueueThreshold
-	local destroyBurst = destroyQueueLen >= params.BurstQueueThreshold
-
-	local loadUtilization = if loadBurst then params.BurstUtilization else params.Utilization
-	local destroyUtilization = if destroyBurst then params.BurstUtilization else params.Utilization
-
-	local loadCeiling = if loadBurst then params.LoadBurstMax else params.LoadMax
-	local destroyCeiling = if destroyBurst then params.DestroyBurstMax else params.DestroyMax
-
-	local loadDesired = headroom * loadUtilization
-	local destroyDesired = headroom * destroyUtilization
-
-	-- Smoothed frame already over target means the non-chunk baseline is stale
-	-- (background pressure rose) or chunk work is too high. Pull both budgets
-	-- down toward something that fits the observed overshoot. A tolerance band
-	-- keeps the shrink from firing on every frame that barely crosses target.
-	local shrinkThreshold = effectiveTarget * params.OvershootTolerance
-	if adaptive.SmoothedFrameSeconds > shrinkThreshold then
-		local overshoot = adaptive.SmoothedFrameSeconds / shrinkThreshold
-		local factor = math.max(params.ShrinkFactor, 1 / overshoot)
-		local shrunkChunk = adaptive.SmoothedChunkWorkSeconds * factor
-
-		loadDesired = math.min(loadDesired, shrunkChunk)
-		destroyDesired = math.min(destroyDesired, shrunkChunk)
-	end
-
-	budget.LoadSeconds = math.clamp(loadDesired, params.LoadMin, loadCeiling)
-	budget.DestroySeconds = math.clamp(destroyDesired, params.DestroyMin, destroyCeiling)
-
-	debug.profileend()
+    debug.profileend()
 end
 
-const function Resolve(budgetConfig: BudgetConfig?): BudgetState
-	local adaptiveConfig = if budgetConfig then budgetConfig.Adaptive else nil
+const function SplitBandPriority(seed: number, priority: { number }): { number }
+    local total = 0
+    for band = 1, BAND_COUNT do
+        total += priority[band]
+    end
 
-	local loadSeconds =
-	    (if budgetConfig then budgetConfig.LoadSeconds else nil)
-		or DEFAULT_LOAD_BUDGET_SECONDS
+    local result = table.create(BAND_COUNT, 0)
+    if total <= 0 then
+        local even = seed / BAND_COUNT
+        for band = 1, BAND_COUNT do
+            result[band] = even
+        end
+        return result
+    end
 
-	local destroySeconds =
-	    (if budgetConfig then budgetConfig.DestroySeconds else nil)
-		or DEFAULT_DESTROY_BUDGET_SECONDS
+    for band = 1, BAND_COUNT do
+        result[band] = seed * priority[band] / total
+    end
+    return result
+end
 
-	local adaptive: AdaptiveBudgetState? = nil
+const function Resolve(budgetConfig: BudgetConfig?, loadBandPriority: { number }?): BudgetState
+    local adaptiveConfig = if budgetConfig then budgetConfig.Adaptive else nil
 
-	if adaptiveConfig ~= false then
-		local params = ResolveAdaptiveParams(
-		    if type(adaptiveConfig) == "table" then adaptiveConfig else nil
-		)
+    local loadSeed =
+        (if budgetConfig then budgetConfig.LoadSeconds else nil)
+        or DEFAULT_LOAD_BUDGET_SECONDS
 
-		local seedTarget = params.TargetFrameSeconds or DEFAULT_FALLBACK_TARGET_SECONDS
+    local destroySeconds =
+        (if budgetConfig then budgetConfig.DestroySeconds else nil)
+        or DEFAULT_DESTROY_BUDGET_SECONDS
 
-		adaptive = {
-			Params = params,
-			SmoothedFrameSeconds = seedTarget,
-			SmoothedChunkWorkSeconds = 0,
-			BaselineNonChunkSeconds = 0,
-			DetectedTargetSeconds = math.huge,
-			FramesSeen = 0,
-			QuietFramesSeen = 0,
-		}
-	end
+    local priority = loadBandPriority or DEFAULT_LOAD_BAND_PRIORITY
 
-	return {
-		LoadSeconds = loadSeconds,
-		DestroySeconds = destroySeconds,
-		Adaptive = adaptive,
-	}
+    local loadSeconds = SplitBandPriority(loadSeed, priority)
+
+    local adaptive: AdaptiveBudgetState? = nil
+
+    if adaptiveConfig ~= false then
+        local params = ResolveAdaptiveParams(
+            if type(adaptiveConfig) == "table" then adaptiveConfig else nil
+        )
+
+        for band = 1, BAND_COUNT do
+            if loadSeconds[band] < params.MinBudgetSeconds then
+                loadSeconds[band] = params.MinBudgetSeconds
+            end
+        end
+
+        local seedTarget = params.TargetFrameSeconds or DEFAULT_FALLBACK_TARGET_SECONDS
+
+        adaptive = {
+            Params = params,
+            SmoothedFrameSeconds = seedTarget,
+            SmoothedChunkWorkSeconds = 0,
+            BaselineNonChunkSeconds = 0,
+            DetectedTargetSeconds = math.huge,
+            FramesSeen = 0,
+            QuietFramesSeen = 0,
+            LastLoadP95 = table.create(BAND_COUNT, 0),
+            LastLoadHoLAge = table.create(BAND_COUNT, 0),
+            LastDestroyP95 = 0,
+            LastDestroyHoLAge = 0,
+        }
+    end
+
+    return {
+        LoadSeconds = loadSeconds,
+        DestroySeconds = destroySeconds,
+        Adaptive = adaptive,
+    }
 end
 
 return {
-	Adapt = Adapt,
-	Resolve = Resolve,
+    Adapt = Adapt,
+    Resolve = Resolve,
 }

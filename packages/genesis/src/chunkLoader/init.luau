@@ -14,6 +14,7 @@ type DebugVisuals = DebugVisuals.DebugVisuals
 
 const HALF_VEC = vector.create(0.5, 0.5, 0.5)
 const DEFAULT_SPLIT_FACTOR = 1.0
+const BAND_COUNT = 3
 
 type ChunkKey = vector
 
@@ -24,6 +25,9 @@ export type BaseChunkLoaderConfig = {
     RenderDistance: number,
     OctreeLodAmount: number?,
     OctreeSplitFactor: number?,
+    NearBandRadius: number?,
+    MidBandRadius: number?,
+    LoadBandPriority: { number }?,
 }
 
 -- Workaround for a solver bug with optional fields.
@@ -42,11 +46,18 @@ export type LoaderStats = {
     },
     Queues: {
         Load: number,
+        LoadByBand: { number },
         Destroy: number,
     },
     Budget: {
-        LoadSeconds: number,
+        LoadSeconds: { number },
         DestroySeconds: number,
+    },
+    SLO: {
+        LoadResidenceP95: { number },
+        DestroyResidenceP95: number,
+        LoadHoLAgeSeconds: { number },
+        DestroyHoLAgeSeconds: number,
     },
     Octree: {
         Leaves: number,
@@ -103,7 +114,9 @@ const function EnterRegion(
 
     local reconciler = self.Reconciler
     local desired = reconciler.Desired
-    local loadQueue = reconciler.LoadQueue
+    local loadQueues = reconciler.LoadQueues
+    local loadEnqueueClocks = reconciler.LoadEnqueueClocks
+    local enqueueClocks = reconciler.EnqueueClocks
     local undesired = reconciler.Undesired
 
     local stepX = if fromX <= toX then 1 else -1
@@ -121,8 +134,13 @@ const function EnterRegion(
                         -- Octree is still alive from a prior leave; just un-mark.
                         undesired[key] = nil
                         reconciler.UndesiredCount -= 1
+                        enqueueClocks[key] = nil
                     else
-                        loadQueue:Push(key)
+                        local now = os.clock()
+                        local band = Reconciler.ClassifyBand(reconciler, key)
+                        loadQueues[band]:Push(key)
+                        loadEnqueueClocks[band]:Push(now)
+                        enqueueClocks[key] = now
                     end
                 end
             end
@@ -144,6 +162,7 @@ const function LeaveRegion(
     local octrees = reconciler.Octrees
     local createInflight = reconciler.CreateInflight
     local undesired = reconciler.Undesired
+    local enqueueClocks = reconciler.EnqueueClocks
 
     local stepX = if fromX <= toX then 1 else -1
     local stepY = if fromY <= toY then 1 else -1
@@ -161,6 +180,7 @@ const function LeaveRegion(
                 if octrees[key] ~= nil and createInflight[key] == nil and undesired[key] == nil then
                     undesired[key] = true
                     reconciler.UndesiredCount += 1
+                    enqueueClocks[key] = os.clock()
                 end
             end
         end
@@ -212,20 +232,27 @@ const function DiffRenderDist(
 )
     debug.profilebegin("Genesis/Loader/DiffRenderDist")
 
-    local enter = EnterRegion
+    local growing = newDist > oldDist
     local innerDist, outerDist = oldDist, newDist
-
-    if newDist < oldDist then
-        enter = LeaveRegion
+    if not growing then
         innerDist, outerDist = newDist, oldDist
     end
 
-    enter(self, centerX + innerDist + 1, centerY - outerDist, centerZ - outerDist, centerX + outerDist, centerY + outerDist, centerZ + outerDist)
-    enter(self, centerX - outerDist, centerY - outerDist, centerZ - outerDist, centerX - innerDist - 1, centerY + outerDist, centerZ + outerDist)
-    enter(self, centerX - innerDist, centerY + innerDist + 1, centerZ - outerDist, centerX + innerDist, centerY + outerDist, centerZ + outerDist)
-    enter(self, centerX - innerDist, centerY - outerDist, centerZ - outerDist, centerX + innerDist, centerY - innerDist - 1, centerZ + outerDist)
-    enter(self, centerX - innerDist, centerY - innerDist, centerZ + innerDist + 1, centerX + innerDist, centerY + innerDist, centerZ + outerDist)
-    enter(self, centerX - innerDist, centerY - innerDist, centerZ - outerDist, centerX + innerDist, centerY + innerDist, centerZ - innerDist - 1)
+    if growing then
+        EnterRegion(self, centerX + innerDist + 1, centerY - outerDist, centerZ - outerDist, centerX + outerDist, centerY + outerDist, centerZ + outerDist)
+        EnterRegion(self, centerX - outerDist, centerY - outerDist, centerZ - outerDist, centerX - innerDist - 1, centerY + outerDist, centerZ + outerDist)
+        EnterRegion(self, centerX - innerDist, centerY + innerDist + 1, centerZ - outerDist, centerX + innerDist, centerY + outerDist, centerZ + outerDist)
+        EnterRegion(self, centerX - innerDist, centerY - outerDist, centerZ - outerDist, centerX + innerDist, centerY - innerDist - 1, centerZ + outerDist)
+        EnterRegion(self, centerX - innerDist, centerY - innerDist, centerZ + innerDist + 1, centerX + innerDist, centerY + innerDist, centerZ + outerDist)
+        EnterRegion(self, centerX - innerDist, centerY - innerDist, centerZ - outerDist, centerX + innerDist, centerY + innerDist, centerZ - innerDist - 1)
+    else
+        LeaveRegion(self, centerX + innerDist + 1, centerY - outerDist, centerZ - outerDist, centerX + outerDist, centerY + outerDist, centerZ + outerDist)
+        LeaveRegion(self, centerX - outerDist, centerY - outerDist, centerZ - outerDist, centerX - innerDist - 1, centerY + outerDist, centerZ + outerDist)
+        LeaveRegion(self, centerX - innerDist, centerY + innerDist + 1, centerZ - outerDist, centerX + innerDist, centerY + outerDist, centerZ + outerDist)
+        LeaveRegion(self, centerX - innerDist, centerY - outerDist, centerZ - outerDist, centerX + innerDist, centerY - innerDist - 1, centerZ + outerDist)
+        LeaveRegion(self, centerX - innerDist, centerY - innerDist, centerZ + innerDist + 1, centerX + innerDist, centerY + innerDist, centerZ + outerDist)
+        LeaveRegion(self, centerX - innerDist, centerY - innerDist, centerZ - outerDist, centerX + innerDist, centerY + innerDist, centerZ - innerDist - 1)
+    end
 
     debug.profileend()
 end
@@ -322,9 +349,10 @@ const function PollTarget(self: ChunkLoader)
 
     debug.profilebegin("Genesis/Loader/PollTarget")
 
-    self.Reconciler.Target = pos
-
     local newX, newY, newZ = ChunkPos(pos, self.RootSize)
+
+    self.Reconciler.Target = pos
+    self.Reconciler.TargetChunk = vector.create(newX, newY, newZ)
 
     local renderDistance, lastX = self.RenderDistance, self.LastX
 
@@ -367,6 +395,7 @@ const function SetTarget(self: ChunkLoader, target: any?)
     self.LastY = nil
     self.LastZ = nil
     self.Reconciler.Target = nil
+    self.Reconciler.TargetChunk = nil
 
     if target ~= nil then
         PollTarget(self)
@@ -398,10 +427,37 @@ const function SetDebugVisuals(self: ChunkLoader, enabled: boolean)
     self.DebugVisuals:SetEnabled(enabled)
 end
 
+const function OldestUndesiredEnqueueClock(reconciler: Reconciler): number?
+    if reconciler.UndesiredCount == 0 then return nil end
+
+    local enqueueClocks = reconciler.EnqueueClocks
+    local oldest: number? = nil
+
+    for key in reconciler.Undesired do
+        local t = enqueueClocks[key]
+        if t ~= nil then
+            if oldest == nil or t < oldest then
+                oldest = t
+            end
+        end
+    end
+
+    return oldest
+end
+
+const ZERO_BAND_TABLE = table.create(BAND_COUNT, 0)
+
 const function Stats(self: ChunkLoader): LoaderStats
     debug.profilebegin("Genesis/Loader/Stats")
 
-    local rstats = self.Reconciler:Stats()
+    local reconciler = self.Reconciler
+    local rstats = reconciler:Stats()
+
+    local adaptive = self.Budget.Adaptive
+    local loadP95: { number } = if adaptive then adaptive.LastLoadP95 else ZERO_BAND_TABLE
+    local loadHoL: { number } = if adaptive then adaptive.LastLoadHoLAge else ZERO_BAND_TABLE
+    local destroyP95 = if adaptive then adaptive.LastDestroyP95 else 0
+    local destroyHoL = if adaptive then adaptive.LastDestroyHoLAge else 0
 
     debug.profileend()
 
@@ -414,11 +470,18 @@ const function Stats(self: ChunkLoader): LoaderStats
         },
         Queues = {
             Load = rstats.PendingCreate,
+            LoadByBand = rstats.PendingCreateByBand,
             Destroy = rstats.PendingDestroy,
         },
         Budget = {
             LoadSeconds = self.Budget.LoadSeconds,
             DestroySeconds = self.Budget.DestroySeconds,
+        },
+        SLO = {
+            LoadResidenceP95 = loadP95,
+            DestroyResidenceP95 = destroyP95,
+            LoadHoLAgeSeconds = loadHoL,
+            DestroyHoLAgeSeconds = destroyHoL,
         },
         Octree = rstats.Octree,
     }
@@ -437,20 +500,36 @@ const function Step(self: ChunkLoader, deltaTime: number?)
     local reconciler = self.Reconciler
 
     if resolvedDt ~= nil then
-        -- LoadQueue:Len() is an upper bound on pending creates (stale entries
-        -- are discarded inside LoopBody). UndesiredCount is exact. Both are O(1)
-        -- and feed Budget.Adapt's burst-threshold heuristic.
+        local loadQueueLens = table.create(BAND_COUNT, 0)
+        local loadHoLAges = table.create(BAND_COUNT, 0)
+        for band = 1, BAND_COUNT do
+            loadQueueLens[band] = reconciler.LoadQueues[band]:Len()
+            local oldest = reconciler:OldestLoadEnqueueClock(band)
+            loadHoLAges[band] = if oldest ~= nil then now - oldest else 0
+        end
+
+        local destroyLen = reconciler.UndesiredCount
+        local oldestDestroy = OldestUndesiredEnqueueClock(reconciler)
+        local destroyHoLAge = if oldestDestroy ~= nil then now - oldestDestroy else 0
+
         Budget.Adapt(
             self.Budget,
+            reconciler.LoadResidenceHists,
+            reconciler.DestroyResidenceHist,
             resolvedDt,
             reconciler.LastChunkWorkSeconds,
-            reconciler.LoadQueue:Len(),
-            reconciler.UndesiredCount
+            loadQueueLens,
+            destroyLen,
+            loadHoLAges,
+            destroyHoLAge
         )
     end
 
     local budget = self.Budget
-    reconciler.LoadBudgetSeconds = budget.LoadSeconds
+    local reconcilerLoadBudgets = reconciler.LoadBudgetSeconds
+    for band = 1, BAND_COUNT do
+        reconcilerLoadBudgets[band] = budget.LoadSeconds[band]
+    end
     reconciler.DestroyBudgetSeconds = budget.DestroySeconds
     reconciler.LastChunkWorkSeconds = 0
 
@@ -461,17 +540,26 @@ end
 
 const function ChunkLoader(config: ChunkLoaderConfig): ChunkLoader
     local budget = (config :: any).Budget :: BudgetConfig?
-    local budgetState = Budget.Resolve(budget)
+    local loadBandPriority = (config :: any).LoadBandPriority :: { number }?
+    local budgetState = Budget.Resolve(budget, loadBandPriority)
 
     local octreeLodAmount = (config :: any).OctreeLodAmount or 1
     local rootSize = config.ChunkSize * 2 ^ (octreeLodAmount - 1)
     local octreeSplitFactor = (config :: any).OctreeSplitFactor or DEFAULT_SPLIT_FACTOR
+
+    local renderDistance = config.RenderDistance
+    local nearBandRadius =
+        (config :: any).NearBandRadius or math.max(1, math.floor(renderDistance / 3))
+    local midBandRadius =
+        (config :: any).MidBandRadius or math.max(nearBandRadius + 1, math.floor(renderDistance * 2 / 3))
 
     local reconciler = Reconciler.New({
         BaseLeafSize = config.ChunkSize,
         LodAmount = octreeLodAmount,
         SplitFactor = octreeSplitFactor,
         Generator = config.Generator,
+        NearBandRadius = nearBandRadius,
+        MidBandRadius = midBandRadius,
     })
 
     local self: ChunkLoader = {
@@ -482,7 +570,7 @@ const function ChunkLoader(config: ChunkLoaderConfig): ChunkLoader
         TargetPosition = (config :: any).TargetPosition or DefaultTargetPosition,
         Budget = budgetState,
         LastStepClock = nil,
-        RenderDistance = config.RenderDistance,
+        RenderDistance = renderDistance,
         LastX = nil,
         LastY = nil,
         LastZ = nil,
