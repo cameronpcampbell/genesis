@@ -11,23 +11,17 @@ const function MarchingCubesGenerator(
     config: MarchingCubes.MarchingCubesConfig?
 )
     local nodes: { [vector]: MeshPart } = {}
-    local baseLeafSize = 0
 
     local marchingCubes = MarchingCubes.new(config)
 
     return {
-        Init = function(initConfig: { ChunkSize: number, OctreeLodAmount: number })
-            baseLeafSize = initConfig.ChunkSize
-        end,
-
-        Create = function(pos: vector, size: vector)
+        Create = function(pos: vector, size: vector, lod: number)
             if nodes[pos] then
                 warn("[Genesis DEBUG] DUPLICATE CREATE at", pos)
                 return
             end
 
-            local canCollide = size.x == baseLeafSize
-            nodes[pos] = marchingCubes.Chunk(pos.x, pos.y, pos.z, size.x, canCollide)
+            nodes[pos] = marchingCubes.Chunk(pos.x, pos.y, pos.z, size.x, lod == 0)
         end,
 
         Destroy = function(pos: vector)

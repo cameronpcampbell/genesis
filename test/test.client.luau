@@ -17,7 +17,7 @@ SpawnLocation.Transparency = 1
 Baseplate.Transparency = 1
 local BaseplatePosY = Baseplate.Position.Y]]
 
-const OCTREE_LOD_AMOUNT = 0
+const OCTREE_LOD_AMOUNT = 4
 
 local Loader = Genesis.New({
     RenderDistance = 0,
@@ -30,7 +30,15 @@ local Loader = Genesis.New({
             Tree = {
                 Radius = 30,
                 Weight = 10,
+
+                Children = {
+                    Pinecone = {
+                        Radius = 10,
+                        Weight = 10
+                    }
+                }
             },
+
         },
     })
 })

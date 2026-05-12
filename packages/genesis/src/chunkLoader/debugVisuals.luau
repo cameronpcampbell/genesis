@@ -18,9 +18,7 @@ const function NewWireframeGenerator(): Generator
     local nodes: { [vector]: WireframeHandleAdornment } = {}
 
     return {
-        Init = function(_config: Reconciler.InitConfig) end,
-
-        Create = function(pos: vector, size: vector)
+        Create = function(pos: vector, size: vector, lod: number)
             local lodBucket = math.round(math.log(size.x, 2))
             local color = LOD_COLORS[(lodBucket % #LOD_COLORS) + 1]
 
@@ -80,14 +78,9 @@ export type DebugVisuals = {
 
 const function MakeTee(real: Generator, debug: Generator): Generator
     return {
-        Init = function(config: Reconciler.InitConfig)
-            real.Init(config)
-            debug.Init(config)
-        end,
-
-        Create = function(pos: vector, size: vector)
-            real.Create(pos, size)
-            debug.Create(pos, size)
+        Create = function(pos: vector, size: vector, lod: number)
+            real.Create(pos, size, lod)
+            debug.Create(pos, size, lod)
         end,
 
         Destroy = function(pos: vector)
@@ -125,8 +118,9 @@ const function SetEnabled(self: DebugVisuals, enabled: boolean)
         for groupIdx = 1, #groups do
             local group = groups[groupIdx]
             local size = sizes[groupIdx]
+            local lod = math.log(size.x / reconciler.BaseLeafSize, 2) / reconciler.LodAmount
             for posIdx = 1, #group do
-                debugGen.Create(group[posIdx], size)
+                debugGen.Create(group[posIdx], size, lod)
             end
         end
 

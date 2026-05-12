@@ -559,7 +559,7 @@ const function ChunkLoader(config: ChunkLoaderConfig): ChunkLoader
     local loadBandPriority = (config :: any).LoadBandPriority :: { number }?
     local budgetState = Budget.Resolve(budget, loadBandPriority)
 
-    local octreeLodAmount = (config :: any).OctreeLodAmount or 1
+    local octreeLodAmount = math.max((config :: any).OctreeLodAmount or 1, 1)
     local rootSize = config.ChunkSize * 2 ^ (octreeLodAmount - 1)
     local octreeSplitFactor = (config :: any).OctreeSplitFactor or DEFAULT_SPLIT_FACTOR
 

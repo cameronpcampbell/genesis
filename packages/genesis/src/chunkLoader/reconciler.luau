@@ -4,14 +4,8 @@
 local Strata = require(script.Parent.Parent.Parent.strata)
 local ResidenceHistogram = require(script.Parent.residenceHistogram)
 
-export type InitConfig = {
-    ChunkSize: number,
-    OctreeLodAmount: number,
-}
-
 export type Generator = {
-    Init: (config: InitConfig) -> (),
-    Create: (position: vector, size: vector) -> (),
+    Create: (position: vector, size: vector, lod: number) -> (),
     Destroy: (position: vector) -> (),
     Sample: (center: vector) -> number,
 }
@@ -442,10 +436,11 @@ const function LoopBody(self: Reconciler)
                 local group = loadBatch[groupIdx]
                 local size = sizeBatch[groupIdx]
                 local band = loadBatchBand[groupIdx]
+                local lod = math.log(size.x / baseLeafSize, 2) / lodAmount
                 local groupStart = os.clock()
                 for idx = 1, #group do
                     local pos = group[idx]
-                    create(pos, size)
+                    create(pos, size, lod)
                     totalCreateCount += 1
                 end
                 local groupElapsed = os.clock() - groupStart
@@ -639,11 +634,6 @@ end
 local Reconciler = {}
 
 function Reconciler.New(config: ReconcilerConfig): Reconciler
-    config.Generator.Init({
-        ChunkSize = config.BaseLeafSize,
-        OctreeLodAmount = config.LodAmount,
-    })
-
     local loadQueues: { RingBuffer<vector> } = {}
     local loadEnqueueClocks: { RingBuffer<number> } = {}
     local bandResidenceHists: { ResidenceHistogram } = {}
