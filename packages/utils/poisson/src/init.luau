@@ -4,6 +4,7 @@
 export type Node = {
 	Radius: number,
 	Weight: number,
+	ChildSpawnRadius: number?,
 	Children: { [string]: Node }?,
 }
 
@@ -18,6 +19,7 @@ export type Group = {
 	Names: { string },
 	Radii: { number },
 	Weights: { number },
+	ChildSpawnRadii: { number },
 	TotalWeight: number,
 	ChildGroups: { Group? },
 }
@@ -34,6 +36,7 @@ export type Poisson = {
 type SamplerState = {
 	Points: { Sample },
 	PointRadii: { number },
+	PointChildSpawnRadii: { number },
 	PointChildGroups: { Group? },
 	PointParents: { number },
 	Grid: { [number]: { number } },
@@ -66,6 +69,7 @@ const function BuildGroup(nodes: { [string]: Node }, accum: { Min: number, Max: 
 	local names = table.create(count) :: { string }
 	local radii = table.create(count) :: { number }
 	local weights = table.create(count) :: { number }
+	local childSpawnRadii = table.create(count) :: { number }
 	local childGroups = table.create(count) :: { Group? }
 	local totalWeight = 0
 
@@ -83,9 +87,18 @@ const function BuildGroup(nodes: { [string]: Node }, accum: { Min: number, Max: 
 			error("[Poisson] node '" .. name .. "' has invalid Weight; must be a number > 0")
 		end
 
+		local childSpawnRadius = node.ChildSpawnRadius
+		if childSpawnRadius == nil then
+			childSpawnRadius = radius
+
+		elseif type(childSpawnRadius) ~= "number" or childSpawnRadius <= 0 then
+			error("[Poisson] node '" .. name .. "' has invalid ChildSpawnRadius; must be a number > 0")
+		end
+
 		names[idx] = name
 		radii[idx] = radius
 		weights[idx] = weight
+		childSpawnRadii[idx] = childSpawnRadius
 		totalWeight += weight
 
 		if radius < accum.Min then accum.Min = radius end
@@ -101,6 +114,7 @@ const function BuildGroup(nodes: { [string]: Node }, accum: { Min: number, Max: 
 		Names = names,
 		Radii = radii,
 		Weights = weights,
+		ChildSpawnRadii = childSpawnRadii,
 		TotalWeight = totalWeight,
 		ChildGroups = childGroups,
 	}
@@ -183,6 +197,7 @@ const function AddSample(
 	py: number,
 	name: string,
 	radius: number,
+	childSpawnRadius: number,
 	childGroup: Group?,
 	parentIdx: number
 ): number
@@ -191,6 +206,7 @@ const function AddSample(
 
 	points[idx] = { Position = vector.create(px, py), Name = name }
 	state.PointRadii[idx] = radius
+	state.PointChildSpawnRadii[idx] = childSpawnRadius
 	state.PointChildGroups[idx] = childGroup
 	state.PointParents[idx] = parentIdx
 
@@ -223,9 +239,39 @@ const function BridsonPass(
 	local rng = state.Rng
 	local sizeX = state.SizeX
 	local sizeY = state.SizeY
-	local isDisc = regionRadius > 0
-	local discRadiusSq = regionRadius * regionRadius
 	local ignoreSet = BuildIgnoreSet(state.PointParents, parentIdx)
+
+	if parentIdx ~= 0 then
+		local failures = 0
+
+		while failures < K do
+			local classIdx = PickWeighted(rng, group)
+			local radius = group.Radii[classIdx]
+			local childSpawnRadius = group.ChildSpawnRadii[classIdx]
+			local name = group.Names[classIdx]
+			local childGroup = group.ChildGroups[classIdx]
+
+			local angle = rng:NextNumber() * TWO_PI
+			local r = regionRadius * math.sqrt(rng:NextNumber())
+			local px = centerX + math.cos(angle) * r
+			local py = centerY + math.sin(angle) * r
+
+			if px < 0 or px >= sizeX or py < 0 or py >= sizeY then
+				failures += 1
+				continue
+			end
+
+			if not IsValid(state, px, py, radius, ignoreSet) then
+				failures += 1
+				continue
+			end
+
+			AddSample(state, px, py, name, radius, childSpawnRadius, childGroup, parentIdx)
+			failures = 0
+		end
+
+		return
+	end
 
 	local active: { number } = {}
 	local seeded = false
@@ -233,28 +279,16 @@ const function BridsonPass(
 	for seedIdx = 1, SEED_ATTEMPTS do
 		local classIdx = PickWeighted(rng, group)
 		local radius = group.Radii[classIdx]
+		local childSpawnRadius = group.ChildSpawnRadii[classIdx]
 		local name = group.Names[classIdx]
 		local childGroup = group.ChildGroups[classIdx]
 
-		local px: number
-		local py: number
-
-		if isDisc then
-			local angle = rng:NextNumber() * TWO_PI
-			local r = regionRadius * math.sqrt(rng:NextNumber())
-			px = centerX + math.cos(angle) * r
-			py = centerY + math.sin(angle) * r
-
-		else
-			px = rng:NextNumber() * sizeX
-			py = rng:NextNumber() * sizeY
-		end
-
-		if px < 0 or px >= sizeX or py < 0 or py >= sizeY then continue end
+		local px = rng:NextNumber() * sizeX
+		local py = rng:NextNumber() * sizeY
 
 		if not IsValid(state, px, py, radius, ignoreSet) then continue end
 
-		local idx = AddSample(state, px, py, name, radius, childGroup, parentIdx)
+		local idx = AddSample(state, px, py, name, radius, childSpawnRadius, childGroup, parentIdx)
 		active[#active + 1] = idx
 		seeded = true
 		break
@@ -276,6 +310,7 @@ const function BridsonPass(
 		for candidateIdx = 1, K do
 			local classIdx = PickWeighted(rng, group)
 			local radius = group.Radii[classIdx]
+			local childSpawnRadius = group.ChildSpawnRadii[classIdx]
 			local name = group.Names[classIdx]
 			local childGroup = group.ChildGroups[classIdx]
 
@@ -291,15 +326,9 @@ const function BridsonPass(
 
 			if px < 0 or px >= sizeX or py < 0 or py >= sizeY then continue end
 
-			if isDisc then
-				local dx = px - centerX
-				local dy = py - centerY
-				if dx * dx + dy * dy > discRadiusSq then continue end
-			end
-
 			if not IsValid(state, px, py, radius, ignoreSet) then continue end
 
-			local idx = AddSample(state, px, py, name, radius, childGroup, parentIdx)
+			local idx = AddSample(state, px, py, name, radius, childSpawnRadius, childGroup, parentIdx)
 			active[#active + 1] = idx
 			placed = true
 			break
@@ -329,6 +358,7 @@ const function Sample(self: Poisson, seed: number, size: vector): { Sample }
 	local state: SamplerState = {
 		Points = {},
 		PointRadii = {},
+		PointChildSpawnRadii = {},
 		PointChildGroups = {},
 		PointParents = {},
 		Grid = {},
@@ -348,8 +378,8 @@ const function Sample(self: Poisson, seed: number, size: vector): { Sample }
 		local childGroup = state.PointChildGroups[idx]
 		if childGroup then
 			local position = state.Points[idx].Position
-			local radius = state.PointRadii[idx]
-			BridsonPass(state, childGroup, position.x, position.y, radius, idx)
+			local spawnRadius = state.PointChildSpawnRadii[idx]
+			BridsonPass(state, childGroup, position.x, position.y, spawnRadius, idx)
 		end
 		idx += 1
 	end

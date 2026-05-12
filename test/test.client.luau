@@ -13,7 +13,7 @@ SpawnLocation.Transparency = 1
 const OCTREE_LOD_AMOUNT = 4
 
 local Loader = Genesis.New({
-    RenderDistance = 8,
+    RenderDistance = 0,
     ChunkSize = 2048 / (2 ^ OCTREE_LOD_AMOUNT),
     OctreeLodAmount = OCTREE_LOD_AMOUNT,
     OctreeSplitFactor = 3.5,
@@ -21,12 +21,13 @@ local Loader = Genesis.New({
         Seed = 25,
         Vegetation = {
             Tree = {
-                Radius = 30,
+                Radius = 25,
                 Weight = 10,
+                ChildSpawnRadius = 15,
 
                 Children = {
                     Pinecone = {
-                        Radius = 10,
+                        Radius = 5,
                         Weight = 10
                     }
                 }
@@ -36,7 +37,7 @@ local Loader = Genesis.New({
     })
 })
 
-Loader:SetDebugVisuals(true)
+--Loader:SetDebugVisuals(true)
 
 const DEBUG_INTERVAL = 1.0
 local DebugAccum = 0.0

@@ -10,6 +10,7 @@ local Poisson = require(poisson)
 local sampler = Poisson.new({
     Tree = {
         Radius = 15,
+        ChildSpawnRadius = 12,
         Weight = 10,
 
         Children = {
@@ -36,7 +37,8 @@ Each node has:
 
 - `Radius` — exclusion radius. Two samples `A` and `B` satisfy `distance(A, B) >= rA + rB` (their radius discs do not overlap). One exception: a sample may overlap any of its ancestors so that children can lie inside their parent's footprint.
 - `Weight` — relative probability that a candidate position becomes this class versus its siblings. Higher weight, more samples.
-- `Children` — optional table of nested nodes. Children are placed *within* their parent's radius after the parent is placed. Nesting is unbounded.
+- `ChildSpawnRadius` — optional. Radius of the disc, centered on this sample, in which this node's children are scattered. Defaults to `Radius` when omitted. Has no effect on nodes without `Children`.
+- `Children` — optional table of nested nodes. Children are placed *within* their parent's `ChildSpawnRadius` after the parent is placed. Nesting is unbounded.
 
 The output is a flat list of `{ Position: vector, Name: string }`. The hierarchy is only used during placement.
 
