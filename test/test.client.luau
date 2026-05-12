@@ -17,15 +17,21 @@ SpawnLocation.Transparency = 1
 Baseplate.Transparency = 1
 local BaseplatePosY = Baseplate.Position.Y]]
 
-const OCTREE_LOD_AMOUNT = 4
+const OCTREE_LOD_AMOUNT = 0
 
 local Loader = Genesis.New({
-    RenderDistance = 10,
+    RenderDistance = 0,
     ChunkSize = 2048 / (2 ^ OCTREE_LOD_AMOUNT),
     OctreeLodAmount = OCTREE_LOD_AMOUNT,
     OctreeSplitFactor = 3.5,
     Generator = Terra.MarchingCubes({
-        Seed = 25
+        Seed = 25,
+        Vegetation = {
+            Tree = {
+                Radius = 30,
+                Weight = 10,
+            },
+        },
     })
 })
 

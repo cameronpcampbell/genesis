@@ -5,10 +5,13 @@
 local AssetService = game:GetService("AssetService")
 
 local EMeshQueue = require(script.Parent.Parent.Parent.utils.eMeshQueue)
+local Poisson = require(script.Parent.Parent.Parent.utils.poisson)
 const LOOKUP_TABLE = require(script.lookupTable)
 
 const MOVE_RIGHT = 1
 const EMPTY_TABLE = {}
+const VEGETATION_SEED_X = 73856093
+const VEGETATION_SEED_Z = 19349663
 
 export type MarchingCubesConfig = {
     Resolution: number?,
@@ -18,7 +21,8 @@ export type MarchingCubesConfig = {
     Lacunarity: number?,
     Persistence: number?,
     Scale: number?,
-    Amplitude: number?
+    Amplitude: number?,
+    Vegetation: Poisson.Config?,
 }
 
 type ValuesTable = { number }
@@ -178,6 +182,45 @@ const function MarchingCubes(
 	return march, bounds
 end
 
+const function NameToColor(name: string): Color3
+	local hash = 0
+	for idx = 1, #name do
+		hash = (hash * 31 + string.byte(name, idx)) % 360
+	end
+	return Color3.fromHSV(hash / 360, 0.7, 0.85)
+end
+
+const function PlaceVegetation(
+	mesh: MeshPart,
+	sampler: Poisson.Poisson,
+	startX: number, startY: number, startZ: number, chunkSize: number,
+	seed: number, isoValue: number, amplitude: number,
+	octaves: number, lacunarity: number, persistence: number, scale: number
+)
+	local chunkSeed = seed + math.floor(startX) * VEGETATION_SEED_X + math.floor(startZ) * VEGETATION_SEED_Z
+	local samples = sampler:Sample(chunkSeed, vector.create(chunkSize, chunkSize))
+
+	for sampleIdx = 1, #samples do
+		local sample = samples[sampleIdx]
+		local position = sample.Position
+		local worldX = startX + position.x
+		local worldZ = startZ + position.y
+
+		local noiseValue = FractalNoise(worldX, worldZ, seed, octaves, lacunarity, persistence, scale)
+		local surfaceY = (isoValue - noiseValue) / amplitude
+
+		local part = Instance.new("Part")
+		part.Name = sample.Name
+		part.Anchored = true
+		part.CanCollide = false
+		part.Size = vector.create(2, 4, 2) :: any
+		part.Position = vector.create(worldX, surfaceY + 2, worldZ) :: any
+		part.Color = NameToColor(sample.Name)
+		part.Material = Enum.Material.Grass
+		part.Parent = mesh
+	end
+end
+
 const function Chunk(
     xOffset: number, yOffset: number, zOffset: number, chunkSize: number,
     canCollide: boolean,
@@ -188,7 +231,8 @@ const function Chunk(
     offsetE: number, offsetF: number, offsetG: number,
     moveUp: number,
     octaves: number, lacunarity: number, persistence: number,
-    scale: number, amplitude: number
+    scale: number, amplitude: number,
+    vegetationSampler: Poisson.Poisson?
 ) : MeshPart?
     local eMesh = eMeshQueue:Wait()
     if not eMesh then print("could not create emesh"); return nil end
@@ -285,6 +329,15 @@ const function Chunk(
 	mesh.CanCollide = canCollide
 	mesh.Parent = workspace
 
+	if vegetationSampler then
+		PlaceVegetation(
+			mesh, vegetationSampler,
+			startX, startY, startZ, chunkSize,
+			seed, isoValue, amplitude,
+			octaves, lacunarity, persistence, scale
+		)
+	end
+
 	return mesh
 end
 
@@ -315,6 +368,8 @@ const function New(config: MarchingCubesConfig?)
     	moveForwards + moveUp + MOVE_RIGHT,
     	moveUp + MOVE_RIGHT
 
+    local vegetationSampler: Poisson.Poisson? = if config.Vegetation then Poisson.new(config.Vegetation) else nil
+
      return {
          Chunk = function(xOffset: number, yOffset: number, zOffset: number, chunkSize: number, canCollide: boolean)
              return Chunk(
@@ -327,7 +382,8 @@ const function New(config: MarchingCubesConfig?)
                  offsetE, offsetF, offsetG,
                  moveUp,
                  octaves, lacunarity, persistence,
-                 scale, amplitude
+                 scale, amplitude,
+                 vegetationSampler
              )
          end,
 

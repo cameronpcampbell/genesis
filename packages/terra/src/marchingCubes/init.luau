@@ -7,7 +7,9 @@ local MarchingCubes = require(script.marchingCubes)
 local ChunksFolder = Instance.new("Folder")
 ChunksFolder.Parent = workspace
 
-const function MarchingCubesGenerator(config: MarchingCubes.MarchingCubesConfig?)
+const function MarchingCubesGenerator(
+    config: MarchingCubes.MarchingCubesConfig?
+)
     local nodes: { [vector]: MeshPart } = {}
     local baseLeafSize = 0
 

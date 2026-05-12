@@ -35,3 +35,6 @@ Returns a generator that produces meshed terrain chunks from fractal noise using
 | Octaves | `number?` | `4` | Number of noise octaves layered together. |
 | Lacunarity | `number?` | `0.5` | Frequency multiplier between octaves. |
 | Persistence | `number?` | `0.3` | Amplitude multiplier between octaves. |
+| Vegetation | `Poisson.Config?` | `nil` | If provided, places one `Part` per Poisson sample on the chunk surface. See [Poisson](/packages/utils/poisson/README.md) for the config shape. |
+
+When `Vegetation` is set, every generated chunk samples Poisson over its XZ footprint (seeded per-chunk from `Seed` + chunk position) and spawns a `Part` for every sample at the noise-derived surface height. Spawned parts parent under the chunk's `MeshPart`, so chunk destruction cleans them up. If your chunking generates multiple chunks at the same XZ (different LODs, or stacked Y slices), expect duplicate parts at each surface point.
