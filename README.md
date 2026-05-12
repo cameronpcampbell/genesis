@@ -5,9 +5,10 @@ A procedural terrain generation library for Roblox.
 <img src="example.png" alt="Genesis LOD visualization" width="400" height="400" />
 
 ## Features
-- Optional Octree LOD support.
-- Uses a slab based chunk loader, instead of a naive/slow brute force check against all of the old and updated chunk positions.
-- Has an adaptive budgeting system which intelligently spreads chunk generation across frames to prevent lag.
+- Optional SVO LOD support.
+- Fast slab-based chunk loading that scales to large render distances.
+- Adaptive per-frame budgeting that spreads chunk generation across frames to prevent lag.
+- Target prediction for responsiveness, preloads chunks slightly ahead of the target position.
 
 [Documentation](/packages/genesis/README.md)
 

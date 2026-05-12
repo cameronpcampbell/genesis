@@ -43,9 +43,9 @@ end
 | RootCenter | `vector` | yes | World-space center of the root cell. |
 | BaseLeafSize | `number` | yes | Side length at the finest LOD. Coarser leaves are `2^k` multiples of this. |
 | LodAmount | `number` | yes | Number of LODs including the leaf. Root side length is `BaseLeafSize * 2^(LodAmount - 1)`. |
-| SplitFactor | `number` | no | Controls LOD ring size; defaults to `1.0`. A node splits when the target is within `SplitFactor * size` along any axis. Larger values produce larger LOD rings, pushing each level of detail farther out from the target. |
-| Sample | `(center: vector) -> number` | yes | SDF probe driving sparse voxel octree (SVO) culling: nodes whose `\|Sample(center)\|` exceeds `size * SurfaceFactor` are pruned from the tree. The function must be a true or conservative signed distance field with Lipschitz constant ≤ 1: negative inside the surface, positive outside. |
-| SurfaceFactor | `number` | no | SVO cull threshold multiplier; defaults to `1.5155` (`√3/2 * 1.75` safety factor over the box half-diagonal). A node is pruned when `\|sdf\| >= size * SurfaceFactor`. Increase to be more conservative (cull less, render more); decrease to cull more aggressively at the risk of skipping chunks that actually contain the surface. |
+| SplitFactor | `number` | no | Controls LOD ring size. Defaults to `1.0`. Larger values push each LOD farther out from the target. |
+| Sample | `(center: vector) -> number` | yes | Signed distance function used to cull empty space. Must return negative inside the surface, positive outside, with Lipschitz constant ≤ 1. |
+| SurfaceFactor | `number` | no | Cull threshold multiplier. Defaults to `1.5155`. Increase to cull less (render more nodes), decrease to cull more aggressively. |
 
 ### `octree:SetTarget(target: vector) -> Diff?`
 

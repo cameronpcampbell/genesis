@@ -20,7 +20,7 @@ local BaseplatePosY = Baseplate.Position.Y]]
 const OCTREE_LOD_AMOUNT = 4
 
 local Loader = Genesis.New({
-    RenderDistance = 12,
+    RenderDistance = 10,
     ChunkSize = 2048 / (2 ^ OCTREE_LOD_AMOUNT),
     OctreeLodAmount = OCTREE_LOD_AMOUNT,
     OctreeSplitFactor = 3.5,

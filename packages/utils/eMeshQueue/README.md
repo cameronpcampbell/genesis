@@ -1,6 +1,6 @@
 # EMeshQueue
 
-First-come-first-served queue for `AssetService:CreateEditableMesh()`. Roblox limits how many editable meshes can be created per frame; this queue serializes requests so callers yield until a mesh is actually available instead of failing or busy-waiting.
+First-come-first-served queue for `AssetService:CreateEditableMesh()`. Roblox limits how many editable meshes can be created per frame, so this queue serializes requests and yields callers until a mesh is available instead of failing or busy-waiting.
 
 ## Usage
 
@@ -26,7 +26,7 @@ queue:Destroy()
 
 ### `EMeshQueue.new() -> EMeshQueue`
 
-Creates a queue and connects to `RunService.Heartbeat`. Each frame the queue creates as many editable meshes as `AssetService` will allow and hands them out to waiting threads in arrival order.
+Creates a queue. Waiters are served in arrival order.
 
 ### `queue:Wait(timeout: number?) -> EditableMesh?`
 
