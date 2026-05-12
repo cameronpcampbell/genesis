@@ -13,15 +13,15 @@ SpawnLocation.Transparency = 1
 const OCTREE_LOD_AMOUNT = 4
 
 local Loader = Genesis.New({
-    RenderDistance = 0,
+    RenderDistance = 12,
     ChunkSize = 2048 / (2 ^ OCTREE_LOD_AMOUNT),
     OctreeLodAmount = OCTREE_LOD_AMOUNT,
     OctreeSplitFactor = 3.5,
     Generator = Terra.MarchingCubes({
         Seed = 25,
         Vegetation = {
-            Tree = {
-                Radius = 25,
+        Tree = {
+                Radius = 45,
                 Weight = 10,
                 ChildSpawnRadius = 15,
 
@@ -56,7 +56,7 @@ const function SetupCharacter(char: Model)
     local humanoid = (char :: any).Humanoid :: Humanoid
 
     Loader:SetTarget(char:WaitForChild("HumanoidRootPart"))
-    humanoid.WalkSpeed = 250
+    --humanoid.WalkSpeed = 250
 
     local conn
     conn = humanoid.Died:Connect(function()
