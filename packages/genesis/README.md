@@ -38,7 +38,7 @@ end)
 | Target | `any?` | no | Initial target. Can be a `BasePart` or `vector`. |
 | TargetPosition | `(target: any) -> vector?` | no | Custom function to extract a position from the target. Defaults to reading `BasePart.Position` or passing a vector through. |
 | Budget | `BudgetConfig?` | no | Budgeting configuration. See [Budget](#budget). |
-| LookaheadTime | `number?` | no | Seconds to predict the target position ahead for LOD decisions. Defaults to `0.5`. Set to `0` to disable prediction. |
+| TargetLookaheadTime | `number?` | no | Seconds to predict the target position ahead for LOD decisions. Defaults to `0.5`. Set to `0` to disable prediction. |
 
 ### `loader:Step(deltaTime: number?)`
 

@@ -329,7 +329,7 @@ const function Chunk(
 	mesh.CanCollide = canCollide
 	mesh.Parent = workspace
 
-	if vegetationSampler then
+	if vegetationSampler and canCollide then
 		PlaceVegetation(
 			mesh, vegetationSampler,
 			startX, startY, startZ, chunkSize,

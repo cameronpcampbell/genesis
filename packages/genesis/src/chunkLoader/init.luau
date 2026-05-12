@@ -15,8 +15,9 @@ type DebugVisuals = DebugVisuals.DebugVisuals
 const HALF_VEC = vector.create(0.5, 0.5, 0.5)
 const DEFAULT_SPLIT_FACTOR = 1.0
 const BAND_COUNT = 3
-const DEFAULT_LOOKAHEAD_TIME = 0.5
+const DEFAULT_TARGET_LOOKAHEAD_TIME = 0.5
 const MAX_PREDICTION_SPEED = 100
+const MIN_RAW_PREDICTION_SPEED = 0.5
 const PREDICTION_SMOOTHING = 0.3
 
 type ChunkKey = vector
@@ -29,7 +30,7 @@ export type BaseChunkLoaderConfig = {
     OctreeLodAmount: number?,
     OctreeSplitFactor: number?,
     LoadBandPriority: { number }?,
-    LookaheadTime: number?,
+    TargetLookaheadTime: number?,
 }
 
 -- Workaround for a solver bug with optional fields.
@@ -80,8 +81,7 @@ type ChunkLoader = {
     LastZ: number?,
     PrevTargetPos: vector?,
     TargetVelocity: vector,
-    TargetAcceleration: vector,
-    LookaheadTime: number,
+    TargetLookaheadTime: number,
     Reconciler: Reconciler,
     DebugVisuals: DebugVisuals,
     SetTarget: (self: ChunkLoader, target: any) -> (),
@@ -363,19 +363,16 @@ const function PollTarget(self: ChunkLoader, deltaTime: number?)
             + rawVelocity.z * rawVelocity.z
         if speed2 > MAX_PREDICTION_SPEED * MAX_PREDICTION_SPEED then
             rawVelocity = rawVelocity * (MAX_PREDICTION_SPEED / math.sqrt(speed2))
+            speed2 = MAX_PREDICTION_SPEED * MAX_PREDICTION_SPEED
         end
 
-        local alpha = PREDICTION_SMOOTHING
-        local keep = 1 - alpha
-        local prevVelocity = self.TargetVelocity
-        local newVelocity = prevVelocity * keep + rawVelocity * alpha
-        self.TargetVelocity = newVelocity
+        if speed2 >= MIN_RAW_PREDICTION_SPEED * MIN_RAW_PREDICTION_SPEED then
+            local alpha = PREDICTION_SMOOTHING
+            local keep = 1 - alpha
+            self.TargetVelocity = self.TargetVelocity * keep + rawVelocity * alpha
+        end
 
-        local rawAccel = (newVelocity - prevVelocity) / deltaTime
-        self.TargetAcceleration = self.TargetAcceleration * keep + rawAccel * alpha
-
-        local t = self.LookaheadTime
-        predictedPos = pos + newVelocity * t + self.TargetAcceleration * (0.5 * t * t)
+        predictedPos = pos + self.TargetVelocity * self.TargetLookaheadTime
     end
     self.PrevTargetPos = pos
 
@@ -428,7 +425,6 @@ const function SetTarget(self: ChunkLoader, target: any?)
     self.LastZ = nil
     self.PrevTargetPos = nil
     self.TargetVelocity = vector.create(0, 0, 0)
-    self.TargetAcceleration = vector.create(0, 0, 0)
     self.Reconciler.Target = nil
     self.Reconciler.TargetChunk = nil
 
@@ -586,8 +582,7 @@ const function ChunkLoader(config: ChunkLoaderConfig): ChunkLoader
         LastZ = nil,
         PrevTargetPos = nil,
         TargetVelocity = vector.create(0, 0, 0),
-        TargetAcceleration = vector.create(0, 0, 0),
-        LookaheadTime = (config :: any).LookaheadTime or DEFAULT_LOOKAHEAD_TIME,
+        TargetLookaheadTime = (config :: any).TargetLookaheadTime or DEFAULT_TARGET_LOOKAHEAD_TIME,
         Reconciler = reconciler,
         DebugVisuals = DebugVisuals.New(reconciler),
         SetTarget = SetTarget,
