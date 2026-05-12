@@ -15,6 +15,9 @@ type DebugVisuals = DebugVisuals.DebugVisuals
 const HALF_VEC = vector.create(0.5, 0.5, 0.5)
 const DEFAULT_SPLIT_FACTOR = 1.0
 const BAND_COUNT = 3
+const DEFAULT_LOOKAHEAD_TIME = 0.5
+const MAX_PREDICTION_SPEED = 100
+const PREDICTION_SMOOTHING = 0.3
 
 type ChunkKey = vector
 
@@ -26,6 +29,7 @@ export type BaseChunkLoaderConfig = {
     OctreeLodAmount: number?,
     OctreeSplitFactor: number?,
     LoadBandPriority: { number }?,
+    LookaheadTime: number?,
 }
 
 -- Workaround for a solver bug with optional fields.
@@ -74,6 +78,10 @@ type ChunkLoader = {
     LastX: number?,
     LastY: number?,
     LastZ: number?,
+    PrevTargetPos: vector?,
+    TargetVelocity: vector,
+    TargetAcceleration: vector,
+    LookaheadTime: number,
     Reconciler: Reconciler,
     DebugVisuals: DebugVisuals,
     SetTarget: (self: ChunkLoader, target: any) -> (),
@@ -338,17 +346,45 @@ const function DiffMovement(
     debug.profileend()
 end
 
-const function PollTarget(self: ChunkLoader)
+const function PollTarget(self: ChunkLoader, deltaTime: number?)
     if self.Target == nil then return end
     local pos = self.TargetPosition(self.Target)
     if not pos then return end
 
     debug.profilebegin("Genesis/Loader/PollTarget")
 
-    local newX, newY, newZ = ChunkPos(pos, self.RootSize)
+    local predictedPos = pos
+    local prevPos = self.PrevTargetPos
+    if prevPos ~= nil and deltaTime ~= nil and deltaTime > 0 then
+        local rawVelocity = (pos - prevPos) / deltaTime
 
-    self.Reconciler.Target = pos
-    self.Reconciler.TargetChunk = vector.create(newX, newY, newZ)
+        local speed2 = rawVelocity.x * rawVelocity.x
+            + rawVelocity.y * rawVelocity.y
+            + rawVelocity.z * rawVelocity.z
+        if speed2 > MAX_PREDICTION_SPEED * MAX_PREDICTION_SPEED then
+            rawVelocity = rawVelocity * (MAX_PREDICTION_SPEED / math.sqrt(speed2))
+        end
+
+        local alpha = PREDICTION_SMOOTHING
+        local keep = 1 - alpha
+        local prevVelocity = self.TargetVelocity
+        local newVelocity = prevVelocity * keep + rawVelocity * alpha
+        self.TargetVelocity = newVelocity
+
+        local rawAccel = (newVelocity - prevVelocity) / deltaTime
+        self.TargetAcceleration = self.TargetAcceleration * keep + rawAccel * alpha
+
+        local t = self.LookaheadTime
+        predictedPos = pos + newVelocity * t + self.TargetAcceleration * (0.5 * t * t)
+    end
+    self.PrevTargetPos = pos
+
+    local rootSize = self.RootSize
+    local newX, newY, newZ = ChunkPos(pos, rootSize)
+
+    local predX, predY, predZ = ChunkPos(predictedPos, rootSize)
+    self.Reconciler.Target = predictedPos
+    self.Reconciler.TargetChunk = vector.create(predX, predY, predZ)
 
     local renderDistance, lastX = self.RenderDistance, self.LastX
 
@@ -390,6 +426,9 @@ const function SetTarget(self: ChunkLoader, target: any?)
     self.LastX = nil
     self.LastY = nil
     self.LastZ = nil
+    self.PrevTargetPos = nil
+    self.TargetVelocity = vector.create(0, 0, 0)
+    self.TargetAcceleration = vector.create(0, 0, 0)
     self.Reconciler.Target = nil
     self.Reconciler.TargetChunk = nil
 
@@ -510,7 +549,7 @@ const function Step(self: ChunkLoader, deltaTime: number?)
     end
     reconciler.LastChunkWorkSeconds = 0
 
-    PollTarget(self)
+    PollTarget(self, resolvedDt)
 
     reconciler:Run()
 end
@@ -545,6 +584,10 @@ const function ChunkLoader(config: ChunkLoaderConfig): ChunkLoader
         LastX = nil,
         LastY = nil,
         LastZ = nil,
+        PrevTargetPos = nil,
+        TargetVelocity = vector.create(0, 0, 0),
+        TargetAcceleration = vector.create(0, 0, 0),
+        LookaheadTime = (config :: any).LookaheadTime or DEFAULT_LOOKAHEAD_TIME,
         Reconciler = reconciler,
         DebugVisuals = DebugVisuals.New(reconciler),
         SetTarget = SetTarget,

@@ -38,6 +38,7 @@ end)
 | Target | `any?` | no | Initial target. Can be a `BasePart` or `vector`. |
 | TargetPosition | `(target: any) -> vector?` | no | Custom function to extract a position from the target. Defaults to reading `BasePart.Position` or passing a vector through. |
 | Budget | `BudgetConfig?` | no | Budgeting configuration. See [Budget](#budget). |
+| LookaheadTime | `number?` | no | Seconds to predict the target position ahead for LOD decisions. Defaults to `0.5`. Set to `0` to disable prediction. |
 
 ### `loader:Step(deltaTime: number?)`
 
@@ -49,7 +50,7 @@ Sets or clears the target that chunks load around. Accepts a `BasePart`, a `vect
 
 ### `loader:SetRenderDistance(renderDistance: number)`
 
-Changes the render distance. Chunks outside the new distance are queued for destruction; chunks inside it are queued for creation.
+Changes the render distance. Chunks outside the new distance are queued for destruction, chunks inside it are queued for creation.
 
 ### `loader:Stats() -> LoaderStats`
 
@@ -88,7 +89,7 @@ type LoaderStats = {
 
 ## Band Budgets
 
-Chunks are classified into three bands by the LOD level their leaves render at (derived from the chunk's distance via Strata's split rule). LOD 0 (highest detail, nearest to target) maps to the Near band; LOD `LodAmount - 1` (coarsest, farthest) maps to the Far band; the intermediate LODs fill Mid. Each band has a single per-frame budget that covers all chunk work for that band: new-root creation from the load queue, whole-chunk destruction at the trailing edge, and diff-loop refinement on existing octrees (subdivisions and merges). Inside each band's slot, work runs in priority order — pop queue first so leading-edge chunks aren't starved, then trailing-edge destroys, then refinement.
+Chunks are classified into three bands by the LOD level their leaves render at (derived from the chunk's distance via Strata's split rule). LOD 0 (highest detail, nearest to target) maps to the Near band. LOD `LodAmount - 1` (coarsest, farthest) maps to the Far band, the intermediate LODs fill Mid. Each band has a single per-frame budget that covers all chunk work for that band: new-root creation from the load queue, whole-chunk destruction at the trailing edge, and diff-loop refinement on existing octrees (subdivisions and merges). Inside each band's slot, work runs in priority order, pop queue first so leading-edge chunks aren't starved, then trailing-edge destroys, then refinement.
 
 `LoadBandPriority` seeds the initial split: with the default `{ 1, 2, 3 }`, the seed budget divides 17% Near / 33% Mid / 50% Far across the three bands. Far gets the largest seed because it has the most chunks by volume (outermost shell) and is where new chunks pour in during movement. From there each band adapts independently against its own residence histogram (which samples both create and destroy completions), growing where chunks are settling slowly and shrinking where they're settling quickly.
 
