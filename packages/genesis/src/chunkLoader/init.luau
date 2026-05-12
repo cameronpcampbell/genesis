@@ -25,8 +25,6 @@ export type BaseChunkLoaderConfig = {
     RenderDistance: number,
     OctreeLodAmount: number?,
     OctreeSplitFactor: number?,
-    NearBandRadius: number?,
-    MidBandRadius: number?,
     LoadBandPriority: { number }?,
 }
 
@@ -527,18 +525,12 @@ const function ChunkLoader(config: ChunkLoaderConfig): ChunkLoader
     local octreeSplitFactor = (config :: any).OctreeSplitFactor or DEFAULT_SPLIT_FACTOR
 
     local renderDistance = config.RenderDistance
-    local nearBandRadius =
-        (config :: any).NearBandRadius or math.max(1, math.floor(renderDistance / 3))
-    local midBandRadius =
-        (config :: any).MidBandRadius or math.max(nearBandRadius + 1, math.floor(renderDistance * 2 / 3))
 
     local reconciler = Reconciler.New({
         BaseLeafSize = config.ChunkSize,
         LodAmount = octreeLodAmount,
         SplitFactor = octreeSplitFactor,
         Generator = config.Generator,
-        NearBandRadius = nearBandRadius,
-        MidBandRadius = midBandRadius,
     })
 
     local self: ChunkLoader = {

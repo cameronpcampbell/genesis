@@ -34,8 +34,6 @@ end)
 | OctreeSplitFactor | `number?` | no | Controls how far each LOD ring extends from the target. Defaults to `1.0`. Larger values push coarser detail farther out. |
 | Generator | `Generator` | yes | Object that creates and destroys chunk geometry. |
 | RenderDistance | `number` | yes | Radius in root node units around the target to keep loaded. |
-| NearBandRadius | `number?` | no | Chebyshev radius (in root nodes) of the near band. Defaults to `RenderDistance / 3`. |
-| MidBandRadius | `number?` | no | Chebyshev radius of the mid band. Defaults to `2 * RenderDistance / 3`. |
 | LoadBandPriority | `{ number }?` | no | Initial allocation weights for `{ Near, Mid, Far }`. Defaults to `{ 1, 2, 3 }`. Splits the seed budget across per-band buckets (see [Band Budgets](#band-budgets)). |
 | Target | `any?` | no | Initial target. Can be a `BasePart` or `vector`. |
 | TargetPosition | `(target: any) -> vector?` | no | Custom function to extract a position from the target. Defaults to reading `BasePart.Position` or passing a vector through. |
@@ -90,7 +88,7 @@ type LoaderStats = {
 
 ## Band Budgets
 
-Chunks are classified into three bands by Chebyshev distance from the target: Near (closest), Mid, and Far. Each band has a single per-frame budget that covers all chunk work for that band: new-root creation from the load queue, whole-chunk destruction at the trailing edge, and diff-loop refinement on existing octrees (subdivisions and merges). Inside each band's slot, work runs in priority order — pop queue first so leading-edge chunks aren't starved, then trailing-edge destroys, then refinement.
+Chunks are classified into three bands by the LOD level their leaves render at (derived from the chunk's distance via Strata's split rule). LOD 0 (highest detail, nearest to target) maps to the Near band; LOD `LodAmount - 1` (coarsest, farthest) maps to the Far band; the intermediate LODs fill Mid. Each band has a single per-frame budget that covers all chunk work for that band: new-root creation from the load queue, whole-chunk destruction at the trailing edge, and diff-loop refinement on existing octrees (subdivisions and merges). Inside each band's slot, work runs in priority order — pop queue first so leading-edge chunks aren't starved, then trailing-edge destroys, then refinement.
 
 `LoadBandPriority` seeds the initial split: with the default `{ 1, 2, 3 }`, the seed budget divides 17% Near / 33% Mid / 50% Far across the three bands. Far gets the largest seed because it has the most chunks by volume (outermost shell) and is where new chunks pour in during movement. From there each band adapts independently against its own residence histogram (which samples both create and destroy completions), growing where chunks are settling slowly and shrinking where they're settling quickly.
 
@@ -121,7 +119,7 @@ type BudgetConfig = {
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| BandSeconds | `0.008` | Initial seconds per frame for all chunk work, split across band buckets by `LoadBandPriority`. Each band's bucket covers create, destroy, and refinement for chunks in that band. |
+| BandSeconds | `0.0045` | Initial seconds per frame for all chunk work, split across band buckets by `LoadBandPriority`. Each band's bucket covers create, destroy, and refinement for chunks in that band. |
 | Adaptive | `true` | Set to `false` to pin budgets to the initial seeds, or pass an `AdaptiveBudgetConfig` to tune the SLO controller. |
 
 ### `AdaptiveBudgetConfig`
@@ -132,11 +130,11 @@ All fields are optional.
 | ----- | ------- | ----------- |
 | TargetResidenceSeconds | `2.0` | Target chunk residence time (enqueue to completion) for `TargetPercentile`. |
 | TargetPercentile | `0.95` | Fraction of chunks that should complete within `TargetResidenceSeconds`. |
-| NormalMaxBudgetSeconds | `0.012` | Per-band ceiling under typical load. |
-| BacklogMaxBudgetSeconds | `0.050` | Per-band ceiling when that band is in backlog or starvation. Lifts the frame-time guard rail to let the system catch up. |
+| NormalMaxBudgetSeconds | `0.0075` | Per-band ceiling under typical load. |
+| BacklogMaxBudgetSeconds | `0.030` | Per-band ceiling when that band is in backlog or starvation. Lifts the frame-time guard rail to let the system catch up. |
 | BacklogQueueThreshold | `256` | Per-band queue length (combined load and destroy pending) that activates the backlog ceiling for that band. |
 | StarvationCeilingSeconds | `8.0` | Head-of-line age that forces the budget straight to `BacklogMaxBudgetSeconds`. |
-| MinBudgetSeconds | `0.002` | Floor on the per-frame budget. |
+| MinBudgetSeconds | `0.0015` | Floor on the per-frame budget. |
 | GrowthRate | `1.25` | Per-frame multiplier cap when residence is over target. |
 | ShrinkRate | `0.90` | Per-frame multiplier floor when residence is under target. |
 | TargetFrameSeconds | _auto_ | Calibrated from quiet frames; pass an explicit value to override. |

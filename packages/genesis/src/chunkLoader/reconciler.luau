@@ -34,8 +34,6 @@ export type ReconcilerConfig = {
     LodAmount: number,
     SplitFactor: number,
     Generator: Generator,
-    NearBandRadius: number,
-    MidBandRadius: number,
 }
 
 export type ReconcilerStats = {
@@ -87,9 +85,6 @@ export type Reconciler = {
     ToDestroy: { ChunkKey },
     DestroyCandidatesByBand: { { ChunkKey } },
 
-    NearBandRadius: number,
-    MidBandRadius: number,
-
     Run: (self: Reconciler) -> (),
     Stats: (self: Reconciler) -> ReconcilerStats,
     OldestLoadEnqueueClock: (self: Reconciler, band: number) -> number?,
@@ -107,13 +102,28 @@ const function ClassifyBand(self: Reconciler, key: ChunkKey): number
     if dy < 0 then dy = -dy end
     if dz < 0 then dz = -dz end
 
-    local maxD = dx
-    if dy > maxD then maxD = dy end
-    if dz > maxD then maxD = dz end
+    local cMax = dx
+    if dy > cMax then cMax = dy end
+    if dz > cMax then cMax = dz end
 
-    if maxD <= self.NearBandRadius then return 1 end
-    if maxD <= self.MidBandRadius then return 2 end
-    return 3
+    if cMax == 0 then return 1 end
+
+    local baseLeafSize = self.BaseLeafSize
+    local lodAmount = self.LodAmount
+    local rootSize = baseLeafSize * 2 ^ (lodAmount - 1)
+    local worldDist = (cMax - 0.5) * rootSize
+    if worldDist < baseLeafSize then return 1 end
+
+    local minLeafSize = worldDist / self.SplitFactor
+    if minLeafSize < baseLeafSize then minLeafSize = baseLeafSize end
+
+    local lod = math.floor(math.log(minLeafSize / baseLeafSize, 2))
+    if lod < 0 then lod = 0 end
+    if lod >= lodAmount then lod = lodAmount - 1 end
+
+    local band = math.floor(lod * BAND_COUNT / lodAmount) + 1
+    if band > BAND_COUNT then band = BAND_COUNT end
+    return band
 end
 
 const function AppendDiff(
@@ -682,9 +692,6 @@ function Reconciler.New(config: ReconcilerConfig): Reconciler
         ToCreate = {},
         ToDestroy = {},
         DestroyCandidatesByBand = destroyCandidatesByBand,
-
-        NearBandRadius = config.NearBandRadius,
-        MidBandRadius = config.MidBandRadius,
 
         Run = Run,
         Stats = GetStats,
