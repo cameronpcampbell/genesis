@@ -48,16 +48,17 @@ export type LoaderStats = {
         Load: number,
         LoadByBand: { number },
         Destroy: number,
+        DestroyByBand: { number },
     },
     Budget: {
         LoadSeconds: { number },
-        DestroySeconds: number,
+        DestroySeconds: { number },
     },
     SLO: {
         LoadResidenceP95: { number },
-        DestroyResidenceP95: number,
+        DestroyResidenceP95: { number },
         LoadHoLAgeSeconds: { number },
-        DestroyHoLAgeSeconds: number,
+        DestroyHoLAgeSeconds: { number },
     },
     Octree: {
         Leaves: number,
@@ -427,24 +428,6 @@ const function SetDebugVisuals(self: ChunkLoader, enabled: boolean)
     self.DebugVisuals:SetEnabled(enabled)
 end
 
-const function OldestUndesiredEnqueueClock(reconciler: Reconciler): number?
-    if reconciler.UndesiredCount == 0 then return nil end
-
-    local enqueueClocks = reconciler.EnqueueClocks
-    local oldest: number? = nil
-
-    for key in reconciler.Undesired do
-        local t = enqueueClocks[key]
-        if t ~= nil then
-            if oldest == nil or t < oldest then
-                oldest = t
-            end
-        end
-    end
-
-    return oldest
-end
-
 const ZERO_BAND_TABLE = table.create(BAND_COUNT, 0)
 
 const function Stats(self: ChunkLoader): LoaderStats
@@ -456,8 +439,8 @@ const function Stats(self: ChunkLoader): LoaderStats
     local adaptive = self.Budget.Adaptive
     local loadP95: { number } = if adaptive then adaptive.LastLoadP95 else ZERO_BAND_TABLE
     local loadHoL: { number } = if adaptive then adaptive.LastLoadHoLAge else ZERO_BAND_TABLE
-    local destroyP95 = if adaptive then adaptive.LastDestroyP95 else 0
-    local destroyHoL = if adaptive then adaptive.LastDestroyHoLAge else 0
+    local destroyP95: { number } = if adaptive then adaptive.LastDestroyP95 else ZERO_BAND_TABLE
+    local destroyHoL: { number } = if adaptive then adaptive.LastDestroyHoLAge else ZERO_BAND_TABLE
 
     debug.profileend()
 
@@ -472,6 +455,7 @@ const function Stats(self: ChunkLoader): LoaderStats
             Load = rstats.PendingCreate,
             LoadByBand = rstats.PendingCreateByBand,
             Destroy = rstats.PendingDestroy,
+            DestroyByBand = rstats.PendingDestroyByBand,
         },
         Budget = {
             LoadSeconds = self.Budget.LoadSeconds,
@@ -508,29 +492,35 @@ const function Step(self: ChunkLoader, deltaTime: number?)
             loadHoLAges[band] = if oldest ~= nil then now - oldest else 0
         end
 
-        local destroyLen = reconciler.UndesiredCount
-        local oldestDestroy = OldestUndesiredEnqueueClock(reconciler)
-        local destroyHoLAge = if oldestDestroy ~= nil then now - oldestDestroy else 0
+        local destroyQueueLens = table.create(BAND_COUNT, 0)
+        local destroyOldest: { number? } = table.create(BAND_COUNT)
+        reconciler:AggregateUndesiredByBand(destroyQueueLens, destroyOldest)
+        local destroyHoLAges = table.create(BAND_COUNT, 0)
+        for band = 1, BAND_COUNT do
+            local oldest = destroyOldest[band]
+            destroyHoLAges[band] = if oldest ~= nil then now - oldest else 0
+        end
 
         Budget.Adapt(
             self.Budget,
             reconciler.LoadResidenceHists,
-            reconciler.DestroyResidenceHist,
+            reconciler.DestroyResidenceHists,
             resolvedDt,
             reconciler.LastChunkWorkSeconds,
             loadQueueLens,
-            destroyLen,
+            destroyQueueLens,
             loadHoLAges,
-            destroyHoLAge
+            destroyHoLAges
         )
     end
 
     local budget = self.Budget
     local reconcilerLoadBudgets = reconciler.LoadBudgetSeconds
+    local reconcilerDestroyBudgets = reconciler.DestroyBudgetSeconds
     for band = 1, BAND_COUNT do
         reconcilerLoadBudgets[band] = budget.LoadSeconds[band]
+        reconcilerDestroyBudgets[band] = budget.DestroySeconds[band]
     end
-    reconciler.DestroyBudgetSeconds = budget.DestroySeconds
     reconciler.LastChunkWorkSeconds = 0
 
     PollTarget(self)

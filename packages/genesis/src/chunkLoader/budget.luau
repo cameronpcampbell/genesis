@@ -77,13 +77,13 @@ export type AdaptiveBudgetState = {
     QuietFramesSeen: number,
     LastLoadP95: { number },
     LastLoadHoLAge: { number },
-    LastDestroyP95: number,
-    LastDestroyHoLAge: number,
+    LastDestroyP95: { number },
+    LastDestroyHoLAge: { number },
 }
 
 export type BudgetState = {
     LoadSeconds: { number },
-    DestroySeconds: number,
+    DestroySeconds: { number },
     Adaptive: AdaptiveBudgetState?,
 }
 
@@ -152,13 +152,13 @@ end
 const function Adapt(
     budget: BudgetState,
     loadResidenceHists: { ResidenceHistogram },
-    destroyResidenceHist: ResidenceHistogram,
+    destroyResidenceHists: { ResidenceHistogram },
     frameDt: number,
     chunkWorkSeconds: number,
     loadQueueLens: { number },
-    destroyQueueLen: number,
+    destroyQueueLens: { number },
     loadHoLAges: { number },
-    destroyHoLAge: number
+    destroyHoLAges: { number }
 )
     local adaptive = budget.Adaptive
     if not adaptive then return end
@@ -176,15 +176,14 @@ const function Adapt(
     -- Quiet frames calibrate the engine's per-frame floor and non-chunk
     -- baseline, used as the implicit TargetFrameSeconds when the caller
     -- doesn't pin one explicitly.
-    local totalLoadQueueLen = 0
+    local totalQueueLen = 0
     for band = 1, BAND_COUNT do
-        totalLoadQueueLen += loadQueueLens[band]
+        totalQueueLen += loadQueueLens[band] + destroyQueueLens[band]
     end
 
     local isQuietFrame =
         chunkWorkSeconds < params.QuietChunkThreshold
-        and totalLoadQueueLen == 0
-        and destroyQueueLen == 0
+        and totalQueueLen == 0
 
     if isQuietFrame then
         adaptive.BaselineNonChunkSeconds =
@@ -204,8 +203,11 @@ const function Adapt(
     end
 
     local loadSeconds = budget.LoadSeconds
+    local destroySeconds = budget.DestroySeconds
     local lastLoadP95 = adaptive.LastLoadP95
     local lastLoadHoLAge = adaptive.LastLoadHoLAge
+    local lastDestroyP95 = adaptive.LastDestroyP95
+    local lastDestroyHoLAge = adaptive.LastDestroyHoLAge
 
     for band = 1, BAND_COUNT do
         local resolved, p95, holAge = AdaptSlice(
@@ -220,16 +222,18 @@ const function Adapt(
         lastLoadHoLAge[band] = holAge
     end
 
-    local destroyResolved, destroyP95, destroyHoL = AdaptSlice(
-        budget.DestroySeconds,
-        destroyResidenceHist,
-        destroyQueueLen,
-        destroyHoLAge,
-        params
-    )
-    budget.DestroySeconds = destroyResolved
-    adaptive.LastDestroyP95 = destroyP95
-    adaptive.LastDestroyHoLAge = destroyHoL
+    for band = 1, BAND_COUNT do
+        local resolved, p95, holAge = AdaptSlice(
+            destroySeconds[band],
+            destroyResidenceHists[band],
+            destroyQueueLens[band],
+            destroyHoLAges[band],
+            params
+        )
+        destroySeconds[band] = resolved
+        lastDestroyP95[band] = p95
+        lastDestroyHoLAge[band] = holAge
+    end
 
     debug.profileend()
 end
@@ -262,13 +266,14 @@ const function Resolve(budgetConfig: BudgetConfig?, loadBandPriority: { number }
         (if budgetConfig then budgetConfig.LoadSeconds else nil)
         or DEFAULT_LOAD_BUDGET_SECONDS
 
-    local destroySeconds =
+    local destroySeed =
         (if budgetConfig then budgetConfig.DestroySeconds else nil)
         or DEFAULT_DESTROY_BUDGET_SECONDS
 
     local priority = loadBandPriority or DEFAULT_LOAD_BAND_PRIORITY
 
     local loadSeconds = SplitBandPriority(loadSeed, priority)
+    local destroySeconds = SplitBandPriority(destroySeed, priority)
 
     local adaptive: AdaptiveBudgetState? = nil
 
@@ -280,6 +285,9 @@ const function Resolve(budgetConfig: BudgetConfig?, loadBandPriority: { number }
         for band = 1, BAND_COUNT do
             if loadSeconds[band] < params.MinBudgetSeconds then
                 loadSeconds[band] = params.MinBudgetSeconds
+            end
+            if destroySeconds[band] < params.MinBudgetSeconds then
+                destroySeconds[band] = params.MinBudgetSeconds
             end
         end
 
@@ -295,8 +303,8 @@ const function Resolve(budgetConfig: BudgetConfig?, loadBandPriority: { number }
             QuietFramesSeen = 0,
             LastLoadP95 = table.create(BAND_COUNT, 0),
             LastLoadHoLAge = table.create(BAND_COUNT, 0),
-            LastDestroyP95 = 0,
-            LastDestroyHoLAge = 0,
+            LastDestroyP95 = table.create(BAND_COUNT, 0),
+            LastDestroyHoLAge = table.create(BAND_COUNT, 0),
         }
     end
 

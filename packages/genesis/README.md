@@ -69,16 +69,17 @@ type LoaderStats = {
         Load: number,
         LoadByBand: { number },
         Destroy: number,
+        DestroyByBand: { number },
     },
     Budget: {
         LoadSeconds: { number },
-        DestroySeconds: number,
+        DestroySeconds: { number },
     },
     SLO: {
         LoadResidenceP95: { number },
-        DestroyResidenceP95: number,
+        DestroyResidenceP95: { number },
         LoadHoLAgeSeconds: { number },
-        DestroyHoLAgeSeconds: number,
+        DestroyHoLAgeSeconds: { number },
     },
     Octree: {
         Leaves: number,
@@ -88,15 +89,13 @@ type LoaderStats = {
 }
 ```
 
-`Queues.Load` is the total count of pending new root creations. `Queues.LoadByBand` reports pending creates per band as `{ Near, Mid, Far }`.
-
-`Budget.LoadSeconds` is the current per-frame load budget for each band, indexed as `{ Near, Mid, Far }`. `SLO.LoadResidenceP95` and `SLO.LoadHoLAgeSeconds` are likewise per-band. `SLO.DestroyResidenceP95` and `SLO.DestroyHoLAgeSeconds` are scalars.
+`Queues.Load` and `Queues.Destroy` are total pending counts. `Queues.LoadByBand` and `Queues.DestroyByBand` break them down by band as `{ Near, Mid, Far }`. `Budget.LoadSeconds`, `Budget.DestroySeconds`, and all `SLO` fields are likewise per-band.
 
 ## Band Budgets
 
-Chunks are classified into three bands by Chebyshev distance from the target: Near (closest), Mid, and Far. Each band has its own per-frame load budget bucket. Diff-loop refinement on existing octrees and new-root creation from the load queue both spend from the bucket matching the chunk's band, so a heavy Near refinement pass can't starve Far root creation at the leading edge of movement.
+Chunks are classified into three bands by Chebyshev distance from the target: Near (closest), Mid, and Far. Each band has its own pair of per-frame budget buckets: one for load (new-root creation + diff-loop refinement) and one for destroy (chunks leaving the render volume + diff-loop merges). Work charged to a band spends from that band's bucket, so a heavy Near re-subdivision pass can't starve Far new-root creation, nor can a wave of Far departures slow Near destroys.
 
-`LoadBandPriority` seeds the initial split: with the default `{ 3, 2, 1 }`, the seed load budget divides 50% Near / 33% Mid / 17% Far. From there each band's bucket adapts independently against its own residence histogram, growing where chunks are settling slowly and shrinking where they're settling quickly. Destruction uses a single unbanded budget.
+`LoadBandPriority` seeds the initial split for both buckets: with the default `{ 3, 2, 1 }`, the seed load and destroy budgets each divide 50% Near / 33% Mid / 17% Far. From there each bucket adapts independently against its own residence histogram, growing where chunks are settling slowly and shrinking where they're settling quickly.
 
 ## Generator
 
@@ -127,7 +126,7 @@ type BudgetConfig = {
 | Field | Default | Description |
 | ----- | ------- | ----------- |
 | LoadSeconds | `0.004` | Initial seconds per frame for chunk creation. Split across band buckets by `LoadBandPriority`. |
-| DestroySeconds | `0.004` | Initial seconds per frame allocated to chunk destruction. |
+| DestroySeconds | `0.004` | Initial seconds per frame for chunk destruction. Split across band buckets by `LoadBandPriority`. |
 | Adaptive | `true` | Set to `false` to pin budgets to the initial seeds, or pass an `AdaptiveBudgetConfig` to tune the SLO controller. |
 
 ### `AdaptiveBudgetConfig`
