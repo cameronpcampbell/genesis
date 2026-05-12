@@ -10,11 +10,10 @@ const BAND_COUNT = 3
 const WARMUP_FRAMES = 5
 const MIN_QUIET_FRAMES = 5
 
-const DEFAULT_LOAD_BUDGET_SECONDS = 0.004
-const DEFAULT_DESTROY_BUDGET_SECONDS = 0.004
+const DEFAULT_BAND_BUDGET_SECONDS = 0.008
 const DEFAULT_FALLBACK_TARGET_SECONDS = 1 / 60
 
-const DEFAULT_LOAD_BAND_PRIORITY = { 3, 2, 1 }
+const DEFAULT_LOAD_BAND_PRIORITY = { 1, 2, 3 }
 
 const DEFAULT_TARGET_RESIDENCE_SECONDS = 2.0
 const DEFAULT_TARGET_PERCENTILE = 0.95
@@ -46,8 +45,7 @@ export type AdaptiveBudgetConfig = {
 }
 
 export type BudgetConfig = {
-    LoadSeconds: number?,
-    DestroySeconds: number?,
+    BandSeconds: number?,
     Adaptive: (AdaptiveBudgetConfig | boolean)?,
 }
 
@@ -75,15 +73,12 @@ export type AdaptiveBudgetState = {
     DetectedTargetSeconds: number,
     FramesSeen: number,
     QuietFramesSeen: number,
-    LastLoadP95: { number },
-    LastLoadHoLAge: { number },
-    LastDestroyP95: { number },
-    LastDestroyHoLAge: { number },
+    LastP95: { number },
+    LastHoLAge: { number },
 }
 
 export type BudgetState = {
-    LoadSeconds: { number },
-    DestroySeconds: { number },
+    BandSeconds: { number },
     Adaptive: AdaptiveBudgetState?,
 }
 
@@ -151,14 +146,11 @@ end
 
 const function Adapt(
     budget: BudgetState,
-    loadResidenceHists: { ResidenceHistogram },
-    destroyResidenceHists: { ResidenceHistogram },
+    residenceHists: { ResidenceHistogram },
     frameDt: number,
     chunkWorkSeconds: number,
-    loadQueueLens: { number },
-    destroyQueueLens: { number },
-    loadHoLAges: { number },
-    destroyHoLAges: { number }
+    queueLens: { number },
+    holAges: { number }
 )
     local adaptive = budget.Adaptive
     if not adaptive then return end
@@ -178,7 +170,7 @@ const function Adapt(
     -- doesn't pin one explicitly.
     local totalQueueLen = 0
     for band = 1, BAND_COUNT do
-        totalQueueLen += loadQueueLens[band] + destroyQueueLens[band]
+        totalQueueLen += queueLens[band]
     end
 
     local isQuietFrame =
@@ -202,37 +194,21 @@ const function Adapt(
         return
     end
 
-    local loadSeconds = budget.LoadSeconds
-    local destroySeconds = budget.DestroySeconds
-    local lastLoadP95 = adaptive.LastLoadP95
-    local lastLoadHoLAge = adaptive.LastLoadHoLAge
-    local lastDestroyP95 = adaptive.LastDestroyP95
-    local lastDestroyHoLAge = adaptive.LastDestroyHoLAge
+    local bandSeconds = budget.BandSeconds
+    local lastP95 = adaptive.LastP95
+    local lastHoLAge = adaptive.LastHoLAge
 
     for band = 1, BAND_COUNT do
         local resolved, p95, holAge = AdaptSlice(
-            loadSeconds[band],
-            loadResidenceHists[band],
-            loadQueueLens[band],
-            loadHoLAges[band],
+            bandSeconds[band],
+            residenceHists[band],
+            queueLens[band],
+            holAges[band],
             params
         )
-        loadSeconds[band] = resolved
-        lastLoadP95[band] = p95
-        lastLoadHoLAge[band] = holAge
-    end
-
-    for band = 1, BAND_COUNT do
-        local resolved, p95, holAge = AdaptSlice(
-            destroySeconds[band],
-            destroyResidenceHists[band],
-            destroyQueueLens[band],
-            destroyHoLAges[band],
-            params
-        )
-        destroySeconds[band] = resolved
-        lastDestroyP95[band] = p95
-        lastDestroyHoLAge[band] = holAge
+        bandSeconds[band] = resolved
+        lastP95[band] = p95
+        lastHoLAge[band] = holAge
     end
 
     debug.profileend()
@@ -262,18 +238,13 @@ end
 const function Resolve(budgetConfig: BudgetConfig?, loadBandPriority: { number }?): BudgetState
     local adaptiveConfig = if budgetConfig then budgetConfig.Adaptive else nil
 
-    local loadSeed =
-        (if budgetConfig then budgetConfig.LoadSeconds else nil)
-        or DEFAULT_LOAD_BUDGET_SECONDS
-
-    local destroySeed =
-        (if budgetConfig then budgetConfig.DestroySeconds else nil)
-        or DEFAULT_DESTROY_BUDGET_SECONDS
+    local seed =
+        (if budgetConfig then budgetConfig.BandSeconds else nil)
+        or DEFAULT_BAND_BUDGET_SECONDS
 
     local priority = loadBandPriority or DEFAULT_LOAD_BAND_PRIORITY
 
-    local loadSeconds = SplitBandPriority(loadSeed, priority)
-    local destroySeconds = SplitBandPriority(destroySeed, priority)
+    local bandSeconds = SplitBandPriority(seed, priority)
 
     local adaptive: AdaptiveBudgetState? = nil
 
@@ -283,11 +254,8 @@ const function Resolve(budgetConfig: BudgetConfig?, loadBandPriority: { number }
         )
 
         for band = 1, BAND_COUNT do
-            if loadSeconds[band] < params.MinBudgetSeconds then
-                loadSeconds[band] = params.MinBudgetSeconds
-            end
-            if destroySeconds[band] < params.MinBudgetSeconds then
-                destroySeconds[band] = params.MinBudgetSeconds
+            if bandSeconds[band] < params.MinBudgetSeconds then
+                bandSeconds[band] = params.MinBudgetSeconds
             end
         end
 
@@ -301,16 +269,13 @@ const function Resolve(budgetConfig: BudgetConfig?, loadBandPriority: { number }
             DetectedTargetSeconds = math.huge,
             FramesSeen = 0,
             QuietFramesSeen = 0,
-            LastLoadP95 = table.create(BAND_COUNT, 0),
-            LastLoadHoLAge = table.create(BAND_COUNT, 0),
-            LastDestroyP95 = table.create(BAND_COUNT, 0),
-            LastDestroyHoLAge = table.create(BAND_COUNT, 0),
+            LastP95 = table.create(BAND_COUNT, 0),
+            LastHoLAge = table.create(BAND_COUNT, 0),
         }
     end
 
     return {
-        LoadSeconds = loadSeconds,
-        DestroySeconds = destroySeconds,
+        BandSeconds = bandSeconds,
         Adaptive = adaptive,
     }
 end

@@ -64,8 +64,7 @@ export type Reconciler = {
     Reconciling: boolean,
     Target: vector?,
     TargetChunk: vector?,
-    LoadResidenceHists: { ResidenceHistogram },
-    DestroyResidenceHists: { ResidenceHistogram },
+    BandResidenceHists: { ResidenceHistogram },
 
     BaseLeafSize: number,
     LodAmount: number,
@@ -77,8 +76,7 @@ export type Reconciler = {
     LoadItemCostMax: number,
     DestroyItemCostMax: number,
     LastChunkWorkSeconds: number,
-    LoadBudgetSeconds: { number },
-    DestroyBudgetSeconds: { number },
+    BandBudgetSeconds: { number },
 
     LoadBatch: { { vector } },
     SizeBatch: { vector },
@@ -142,46 +140,6 @@ const function AppendDiff(
     end
 end
 
-const function RunDiffLoopForBand(
-    self: Reconciler,
-    bandFilter: number,
-    target: vector,
-    loadBatch: { { vector } }, sizeBatch: { vector }, loadBatchBand: { number },
-    destroyBatch: { vector }, destroyBatchBand: { number },
-    bandLoadElapsed: number, bandDestroyElapsed: number,
-    bandStructuralStart: number,
-    bandLoadBudget: number, bandDestroyBudget: number,
-    loadItemCostMax: number, destroyItemCostMax: number
-)
-    local octrees = self.Octrees
-    local desired = self.Desired
-    local createInflight = self.CreateInflight
-
-    local committed = false
-    for key, octree in octrees do
-        if not desired[key] then continue end
-        if createInflight[key] then continue end
-        if ClassifyBand(self, key) ~= bandFilter then continue end
-
-        if committed then
-            local liveLoadElapsed = bandLoadElapsed + (os.clock() - bandStructuralStart)
-            local loadOver = liveLoadElapsed + loadItemCostMax > bandLoadBudget
-            local destroyOver = bandDestroyElapsed + destroyItemCostMax > bandDestroyBudget
-            if loadOver and destroyOver then break end
-        end
-
-        local diff = octree:SetTarget(target)
-        if diff ~= nil then
-            AppendDiff(
-                loadBatch, sizeBatch, loadBatchBand,
-                destroyBatch, destroyBatchBand,
-                bandFilter, diff
-            )
-            committed = true
-        end
-    end
-end
-
 const function PopLoadQueueForBand(
     self: Reconciler,
     band: number,
@@ -191,10 +149,10 @@ const function PopLoadQueueForBand(
     loadBatch: { { vector } }, sizeBatch: { vector }, loadBatchBand: { number },
     destroyBatch: { vector }, destroyBatchBand: { number },
     toCreate: { ChunkKey }, toCreateNRef: { number },
-    bandLoadElapsed: number,
+    bandElapsed: number,
     bandStructuralStart: number,
-    bandLoadBudget: number,
-    loadItemCostMax: number
+    bandBudget: number,
+    maxItemCost: number
 )
     local octrees = self.Octrees
     local desired = self.Desired
@@ -208,7 +166,7 @@ const function PopLoadQueueForBand(
 
     local idx = 1
     local consumedN = 0
-    local committedLoad = false
+    local committed = false
 
     while idx <= queueLen do
         local key = loadQueue:At(idx)
@@ -219,9 +177,9 @@ const function PopLoadQueueForBand(
             continue
         end
 
-        if committedLoad then
-            local liveLoadElapsed = bandLoadElapsed + (os.clock() - bandStructuralStart)
-            if liveLoadElapsed + loadItemCostMax > bandLoadBudget then break end
+        if committed then
+            local live = bandElapsed + (os.clock() - bandStructuralStart)
+            if live + maxItemCost > bandBudget then break end
         end
 
         local octree = Strata.New({
@@ -238,7 +196,7 @@ const function PopLoadQueueForBand(
         toCreate[toCreateNRef[1]] = key
         consumedN = idx
         idx += 1
-        committedLoad = true
+        committed = true
 
         if target ~= nil then
             local diff = octree:SetTarget(target)
@@ -258,6 +216,87 @@ const function PopLoadQueueForBand(
     end
 end
 
+const function RunWholeChunkDestroyForBand(
+    self: Reconciler,
+    band: number,
+    destroyBatch: { vector }, destroyBatchBand: { number },
+    toDestroy: { ChunkKey }, toDestroyNRef: { number },
+    bandElapsed: number,
+    bandStructuralStart: number,
+    bandBudget: number,
+    maxItemCost: number
+)
+    local octrees = self.Octrees
+    local destroyInflight = self.DestroyInflight
+    local undesired = self.Undesired
+    local cands = self.DestroyCandidatesByBand[band]
+
+    local committed = false
+    for idx = 1, #cands do
+        if committed then
+            local live = bandElapsed + (os.clock() - bandStructuralStart)
+            if live + maxItemCost > bandBudget then break end
+        end
+
+        local key = cands[idx]
+        local octree = octrees[key]
+        local leaves = octree:Destroy()
+
+        local destroyLen = #destroyBatch
+        for lidx = 1, #leaves do
+            local newIdx = destroyLen + lidx
+            destroyBatch[newIdx] = leaves[lidx]
+            destroyBatchBand[newIdx] = band
+        end
+
+        octrees[key] = nil
+        undesired[key] = nil
+        self.UndesiredCount -= 1
+        destroyInflight[key] = true
+        toDestroyNRef[1] += 1
+        toDestroy[toDestroyNRef[1]] = key
+        committed = true
+    end
+end
+
+const function RunDiffLoopForBand(
+    self: Reconciler,
+    bandFilter: number,
+    target: vector,
+    loadBatch: { { vector } }, sizeBatch: { vector }, loadBatchBand: { number },
+    destroyBatch: { vector }, destroyBatchBand: { number },
+    bandElapsed: number,
+    bandStructuralStart: number,
+    bandBudget: number,
+    maxItemCost: number
+)
+    local octrees = self.Octrees
+    local desired = self.Desired
+    local createInflight = self.CreateInflight
+
+    local committed = false
+    for key, octree in octrees do
+        if not desired[key] then continue end
+        if createInflight[key] then continue end
+        if ClassifyBand(self, key) ~= bandFilter then continue end
+
+        if committed then
+            local live = bandElapsed + (os.clock() - bandStructuralStart)
+            if live + maxItemCost > bandBudget then break end
+        end
+
+        local diff = octree:SetTarget(target)
+        if diff ~= nil then
+            AppendDiff(
+                loadBatch, sizeBatch, loadBatchBand,
+                destroyBatch, destroyBatchBand,
+                bandFilter, diff
+            )
+            committed = true
+        end
+    end
+end
+
 const function AllBandsDone(elapsed: { number }, budget: { number }): boolean
     for band = 1, BAND_COUNT do
         if elapsed[band] < budget[band] then return false end
@@ -268,8 +307,7 @@ end
 const function LoopBody(self: Reconciler)
     local octrees, desired = self.Octrees, self.Desired
     local enqueueClocks = self.EnqueueClocks
-    local loadResidenceHists = self.LoadResidenceHists
-    local destroyResidenceHists = self.DestroyResidenceHists
+    local residenceHists = self.BandResidenceHists
     local createInflight, destroyInflight =
         self.CreateInflight, self.DestroyInflight
     local undesired = self.Undesired
@@ -278,8 +316,7 @@ const function LoopBody(self: Reconciler)
     local rootSize = baseLeafSize * 2 ^ (lodAmount - 1)
     local generator = self.Generator
     local sample = generator.Sample
-    local loadBudgets = self.LoadBudgetSeconds
-    local destroyBudgets = self.DestroyBudgetSeconds
+    local bandBudgets = self.BandBudgetSeconds
 
     self.LoadItemCostMax *= COST_MAX_DECAY
     self.DestroyItemCostMax *= COST_MAX_DECAY
@@ -299,19 +336,19 @@ const function LoopBody(self: Reconciler)
     local toDestroy = self.ToDestroy
     local destroyCandidatesByBand = self.DestroyCandidatesByBand
     local toCreateNRef = { 0 }
+    local toDestroyNRef = { 0 }
 
-    local loadElapsed = table.create(BAND_COUNT, 0)
-    local destroyElapsed = table.create(BAND_COUNT, 0)
+    local bandElapsed = table.create(BAND_COUNT, 0)
     local destroyCountPerBand = table.create(BAND_COUNT, 0)
 
     while true do
-        local allLoadDone = AllBandsDone(loadElapsed, loadBudgets)
-        local allDestroyDone = AllBandsDone(destroyElapsed, destroyBudgets)
-        if allLoadDone and allDestroyDone then break end
+        if AllBandsDone(bandElapsed, bandBudgets) then break end
 
         local target = self.Target
         local loadItemCostMax = self.LoadItemCostMax
         local destroyItemCostMax = self.DestroyItemCostMax
+        local maxItemCost =
+            if loadItemCostMax > destroyItemCostMax then loadItemCostMax else destroyItemCostMax
 
         table.clear(loadBatch)
         table.clear(sizeBatch)
@@ -319,49 +356,13 @@ const function LoopBody(self: Reconciler)
         table.clear(destroyBatch)
         table.clear(destroyBatchBand)
         toCreateNRef[1] = 0
-        local toDestroyN = 0
+        toDestroyNRef[1] = 0
 
         local workStart = os.clock()
 
-        -- Per-band load structural pass: diff loop and pop queue gate against
-        -- their own band's load and destroy budgets. Diff-loop subdivisions
-        -- on a band emit destroys against the same band's destroy bucket,
-        -- so a heavy Near re-subdivision pass adapts up its Near destroy
-        -- budget without dragging Mid/Far destroys with it.
-        for band = 1, BAND_COUNT do
-            if loadElapsed[band] >= loadBudgets[band] then continue end
-
-            local bandStart = os.clock()
-
-            if target ~= nil then
-                RunDiffLoopForBand(
-                    self, band, target,
-                    loadBatch, sizeBatch, loadBatchBand,
-                    destroyBatch, destroyBatchBand,
-                    loadElapsed[band], destroyElapsed[band], bandStart,
-                    loadBudgets[band], destroyBudgets[band],
-                    loadItemCostMax, destroyItemCostMax
-                )
-            end
-
-            if loadElapsed[band] + (os.clock() - bandStart) < loadBudgets[band] then
-                PopLoadQueueForBand(
-                    self, band, target,
-                    rootSize, baseLeafSize, lodAmount, splitFactor, sample,
-                    loadBatch, sizeBatch, loadBatchBand,
-                    destroyBatch, destroyBatchBand,
-                    toCreate, toCreateNRef,
-                    loadElapsed[band], bandStart,
-                    loadBudgets[band], loadItemCostMax
-                )
-            end
-
-            loadElapsed[band] += os.clock() - bandStart
-        end
-
-        -- Per-band destroy structural pass: group undesired chunks by band
-        -- and process each band against its own destroy budget. Stale-flips
-        -- between desire states are still resolved lazily here.
+        -- Build per-band undesired candidate lists once per outer iteration.
+        -- Each chunk is classified at current target so trailing-edge entries
+        -- end up in the appropriate band's slot.
         for band = 1, BAND_COUNT do
             table.clear(destroyCandidatesByBand[band])
         end
@@ -371,38 +372,49 @@ const function LoopBody(self: Reconciler)
             cands[#cands + 1] = key
         end
 
+        -- Per-band slot: pop new roots first (leading-edge creation has the
+        -- highest visual priority), then whole-chunk trailing-edge destroys,
+        -- then diff-loop refinement on existing octrees. All three workloads
+        -- share the band's single budget and elapsed counter.
         for band = 1, BAND_COUNT do
-            if destroyElapsed[band] >= destroyBudgets[band] then continue end
+            if bandElapsed[band] >= bandBudgets[band] then continue end
 
             local bandStart = os.clock()
-            local cands = destroyCandidatesByBand[band]
-            local committed = false
-            for idx = 1, #cands do
-                if committed then
-                    local live = destroyElapsed[band] + (os.clock() - bandStart)
-                    if live + destroyItemCostMax > destroyBudgets[band] then break end
-                end
+            local bandBudget = bandBudgets[band]
 
-                local key = cands[idx]
-                local octree = octrees[key]
-                local leaves = octree:Destroy()
+            PopLoadQueueForBand(
+                self, band, target,
+                rootSize, baseLeafSize, lodAmount, splitFactor, sample,
+                loadBatch, sizeBatch, loadBatchBand,
+                destroyBatch, destroyBatchBand,
+                toCreate, toCreateNRef,
+                bandElapsed[band], bandStart,
+                bandBudget, maxItemCost
+            )
 
-                local destroyLen = #destroyBatch
-                for lidx = 1, #leaves do
-                    destroyBatch[destroyLen + lidx] = leaves[lidx]
-                    destroyBatchBand[destroyLen + lidx] = band
-                end
-
-                octrees[key] = nil
-                undesired[key] = nil
-                self.UndesiredCount -= 1
-                destroyInflight[key] = true
-                toDestroyN += 1
-                toDestroy[toDestroyN] = key
-                committed = true
+            if bandElapsed[band] + (os.clock() - bandStart) < bandBudget then
+                RunWholeChunkDestroyForBand(
+                    self, band,
+                    destroyBatch, destroyBatchBand,
+                    toDestroy, toDestroyNRef,
+                    bandElapsed[band], bandStart,
+                    bandBudget, maxItemCost
+                )
             end
 
-            destroyElapsed[band] += os.clock() - bandStart
+            if target ~= nil
+                and bandElapsed[band] + (os.clock() - bandStart) < bandBudget
+            then
+                RunDiffLoopForBand(
+                    self, band, target,
+                    loadBatch, sizeBatch, loadBatchBand,
+                    destroyBatch, destroyBatchBand,
+                    bandElapsed[band], bandStart,
+                    bandBudget, maxItemCost
+                )
+            end
+
+            bandElapsed[band] += os.clock() - bandStart
         end
 
         if #loadBatch == 0 and #destroyBatch == 0 then
@@ -427,11 +439,11 @@ const function LoopBody(self: Reconciler)
                     totalCreateCount += 1
                 end
                 local groupElapsed = os.clock() - groupStart
-                loadElapsed[band] += groupElapsed
+                bandElapsed[band] += groupElapsed
                 totalElapsed += groupElapsed
             end
 
-            -- Resolve completed root creates: sample residence against the
+            -- Resolve completed root creates: sample residence into the
             -- chunk's current band, then flip desire-changed mid-creates to
             -- pending destroys.
             for idx = 1, toCreateNRef[1] do
@@ -441,7 +453,7 @@ const function LoopBody(self: Reconciler)
                 local enqueuedAt = enqueueClocks[key]
                 if enqueuedAt ~= nil then
                     local band = ClassifyBand(self, key)
-                    loadResidenceHists[band]:Sample(os.clock() - enqueuedAt)
+                    residenceHists[band]:Sample(os.clock() - enqueuedAt)
                     enqueueClocks[key] = nil
                 end
 
@@ -476,14 +488,14 @@ const function LoopBody(self: Reconciler)
                 destroyCountPerBand[destroyBatchBand[idx]] += 1
             end
 
-            for idx = 1, toDestroyN do
+            for idx = 1, toDestroyNRef[1] do
                 local key = toDestroy[idx]
                 destroyInflight[key] = nil
 
                 local enqueuedAt = enqueueClocks[key]
                 if enqueuedAt ~= nil then
                     local band = ClassifyBand(self, key)
-                    destroyResidenceHists[band]:Sample(os.clock() - enqueuedAt)
+                    residenceHists[band]:Sample(os.clock() - enqueuedAt)
                     enqueueClocks[key] = nil
                 end
             end
@@ -496,7 +508,7 @@ const function LoopBody(self: Reconciler)
             if count > 0 then
                 local invCount = 1 / count
                 for band = 1, BAND_COUNT do
-                    destroyElapsed[band] += elapsed * destroyCountPerBand[band] * invCount
+                    bandElapsed[band] += elapsed * destroyCountPerBand[band] * invCount
                 end
 
                 local measured = elapsed * invCount
@@ -583,7 +595,7 @@ const function GetStats(self: Reconciler): ReconcilerStats
 
     local pendingDestroy = self.UndesiredCount
     local pendingDestroyByBand = table.create(BAND_COUNT, 0)
-    local oldestUndesiredByBand: { number? } = table.create(BAND_COUNT)
+    local oldestUndesiredByBand: { number? } = {}
     AggregateUndesiredByBand(self, pendingDestroyByBand, oldestUndesiredByBand)
 
     local octreeStats: Strata.Stats = {
@@ -622,21 +634,18 @@ function Reconciler.New(config: ReconcilerConfig): Reconciler
         OctreeLodAmount = config.LodAmount,
     })
 
-    local loadQueues = table.create(BAND_COUNT)
-    local loadEnqueueClocks = table.create(BAND_COUNT)
-    local loadResidenceHists = table.create(BAND_COUNT)
-    local destroyResidenceHists = table.create(BAND_COUNT)
-    local destroyCandidatesByBand = table.create(BAND_COUNT)
+    local loadQueues: { RingBuffer<vector> } = {}
+    local loadEnqueueClocks: { RingBuffer<number> } = {}
+    local bandResidenceHists: { ResidenceHistogram } = {}
+    local destroyCandidatesByBand: { { vector } } = {}
     for band = 1, BAND_COUNT do
         loadQueues[band] = RingBuffer.New<<vector>>(LOAD_QUEUE_INITIAL_CAPACITY)
         loadEnqueueClocks[band] = RingBuffer.New<<number>>(LOAD_QUEUE_INITIAL_CAPACITY)
-        loadResidenceHists[band] = ResidenceHistogram.New()
-        destroyResidenceHists[band] = ResidenceHistogram.New()
+        bandResidenceHists[band] = ResidenceHistogram.New()
         destroyCandidatesByBand[band] = {}
     end
 
-    local loadBudgetSeconds = table.create(BAND_COUNT, math.huge)
-    local destroyBudgetSeconds = table.create(BAND_COUNT, math.huge)
+    local bandBudgetSeconds = table.create(BAND_COUNT, math.huge)
 
     return {
         Desired = {},
@@ -651,8 +660,7 @@ function Reconciler.New(config: ReconcilerConfig): Reconciler
         Reconciling = false,
         Target = nil,
         TargetChunk = nil,
-        LoadResidenceHists = loadResidenceHists,
-        DestroyResidenceHists = destroyResidenceHists,
+        BandResidenceHists = bandResidenceHists,
 
         BaseLeafSize = config.BaseLeafSize,
         LodAmount = config.LodAmount,
@@ -664,8 +672,7 @@ function Reconciler.New(config: ReconcilerConfig): Reconciler
         LoadItemCostMax = DEFAULT_LOAD_ITEM_COST,
         DestroyItemCostMax = DEFAULT_DESTROY_ITEM_COST,
         LastChunkWorkSeconds = 0,
-        LoadBudgetSeconds = loadBudgetSeconds,
-        DestroyBudgetSeconds = destroyBudgetSeconds,
+        BandBudgetSeconds = bandBudgetSeconds,
 
         LoadBatch = {},
         SizeBatch = {},

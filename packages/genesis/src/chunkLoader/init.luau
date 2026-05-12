@@ -51,14 +51,11 @@ export type LoaderStats = {
         DestroyByBand: { number },
     },
     Budget: {
-        LoadSeconds: { number },
-        DestroySeconds: { number },
+        BandSeconds: { number },
     },
     SLO: {
-        LoadResidenceP95: { number },
-        DestroyResidenceP95: { number },
-        LoadHoLAgeSeconds: { number },
-        DestroyHoLAgeSeconds: { number },
+        ResidenceP95: { number },
+        HoLAgeSeconds: { number },
     },
     Octree: {
         Leaves: number,
@@ -437,10 +434,8 @@ const function Stats(self: ChunkLoader): LoaderStats
     local rstats = reconciler:Stats()
 
     local adaptive = self.Budget.Adaptive
-    local loadP95: { number } = if adaptive then adaptive.LastLoadP95 else ZERO_BAND_TABLE
-    local loadHoL: { number } = if adaptive then adaptive.LastLoadHoLAge else ZERO_BAND_TABLE
-    local destroyP95: { number } = if adaptive then adaptive.LastDestroyP95 else ZERO_BAND_TABLE
-    local destroyHoL: { number } = if adaptive then adaptive.LastDestroyHoLAge else ZERO_BAND_TABLE
+    local p95: { number } = if adaptive then adaptive.LastP95 else ZERO_BAND_TABLE
+    local holAge: { number } = if adaptive then adaptive.LastHoLAge else ZERO_BAND_TABLE
 
     debug.profileend()
 
@@ -458,14 +453,11 @@ const function Stats(self: ChunkLoader): LoaderStats
             DestroyByBand = rstats.PendingDestroyByBand,
         },
         Budget = {
-            LoadSeconds = self.Budget.LoadSeconds,
-            DestroySeconds = self.Budget.DestroySeconds,
+            BandSeconds = self.Budget.BandSeconds,
         },
         SLO = {
-            LoadResidenceP95 = loadP95,
-            DestroyResidenceP95 = destroyP95,
-            LoadHoLAgeSeconds = loadHoL,
-            DestroyHoLAgeSeconds = destroyHoL,
+            ResidenceP95 = p95,
+            HoLAgeSeconds = holAge,
         },
         Octree = rstats.Octree,
     }
@@ -484,42 +476,39 @@ const function Step(self: ChunkLoader, deltaTime: number?)
     local reconciler = self.Reconciler
 
     if resolvedDt ~= nil then
-        local loadQueueLens = table.create(BAND_COUNT, 0)
-        local loadHoLAges = table.create(BAND_COUNT, 0)
-        for band = 1, BAND_COUNT do
-            loadQueueLens[band] = reconciler.LoadQueues[band]:Len()
-            local oldest = reconciler:OldestLoadEnqueueClock(band)
-            loadHoLAges[band] = if oldest ~= nil then now - oldest else 0
-        end
+        local destroyLens = table.create(BAND_COUNT, 0)
+        local destroyOldest: { number? } = {}
+        reconciler:AggregateUndesiredByBand(destroyLens, destroyOldest)
 
-        local destroyQueueLens = table.create(BAND_COUNT, 0)
-        local destroyOldest: { number? } = table.create(BAND_COUNT)
-        reconciler:AggregateUndesiredByBand(destroyQueueLens, destroyOldest)
-        local destroyHoLAges = table.create(BAND_COUNT, 0)
+        local queueLens = table.create(BAND_COUNT, 0)
+        local holAges = table.create(BAND_COUNT, 0)
         for band = 1, BAND_COUNT do
-            local oldest = destroyOldest[band]
-            destroyHoLAges[band] = if oldest ~= nil then now - oldest else 0
+            local loadLen = reconciler.LoadQueues[band]:Len()
+            queueLens[band] = loadLen + destroyLens[band]
+
+            local loadOldest = reconciler:OldestLoadEnqueueClock(band)
+            local destroyOldestBand = destroyOldest[band]
+            local oldest: number? = loadOldest
+            if destroyOldestBand ~= nil and (oldest == nil or destroyOldestBand < oldest) then
+                oldest = destroyOldestBand
+            end
+            holAges[band] = if oldest ~= nil then now - oldest else 0
         end
 
         Budget.Adapt(
             self.Budget,
-            reconciler.LoadResidenceHists,
-            reconciler.DestroyResidenceHists,
+            reconciler.BandResidenceHists,
             resolvedDt,
             reconciler.LastChunkWorkSeconds,
-            loadQueueLens,
-            destroyQueueLens,
-            loadHoLAges,
-            destroyHoLAges
+            queueLens,
+            holAges
         )
     end
 
     local budget = self.Budget
-    local reconcilerLoadBudgets = reconciler.LoadBudgetSeconds
-    local reconcilerDestroyBudgets = reconciler.DestroyBudgetSeconds
+    local reconcilerBandBudgets = reconciler.BandBudgetSeconds
     for band = 1, BAND_COUNT do
-        reconcilerLoadBudgets[band] = budget.LoadSeconds[band]
-        reconcilerDestroyBudgets[band] = budget.DestroySeconds[band]
+        reconcilerBandBudgets[band] = budget.BandSeconds[band]
     end
     reconciler.LastChunkWorkSeconds = 0
 
